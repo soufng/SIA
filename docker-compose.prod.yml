@@ -1,0 +1,93 @@
+# SPM — déploiement de production
+#
+# Diffère de docker-compose.yml (dev) sur quatre points :
+#   1. Le backend tourne dans un conteneur (image à builder via Dockerfile).
+#   2. Un reverse proxy Caddy termine TLS et porte les en-têtes de sécurité.
+#   3. Mongo et Qdrant ne sont plus exposés au monde — accès interne uniquement.
+#   4. Le frontend buildé (dist/) est monté en lecture seule dans Caddy.
+#
+# Avant le premier `up -d` :
+#   - Construisez l'image backend :     docker build -t spm-backend:prod .
+#   - Buildez le frontend :              cd frontend && npm ci && npm run build
+#   - Remplissez le .env.production :   cp .env.example .env.production
+#     (puis `python scripts/rotate_secrets.py` et collez les secrets dedans)
+#   - Exportez ACME_EMAIL :              export ACME_EMAIL=ops@example.org
+#
+# Démarrage :
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: spm_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend/dist:/srv/spm-frontend:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+    networks:
+      - spm_internal
+
+  backend:
+    image: spm-backend:prod
+    container_name: spm_backend
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      SPM_ENV: production
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    networks:
+      - spm_internal
+    # Pas de ports: exposés — uniquement joignable via Caddy.
+
+  mongodb:
+    image: mongo:7
+    container_name: spm_mongodb
+    restart: unless-stopped
+    command: ["--bind_ip_all", "--auth"]
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_backup:/var/backups/mongodb
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - spm_internal
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: spm_qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+      - qdrant_snapshots:/qdrant/snapshots
+    networks:
+      - spm_internal
+
+networks:
+  spm_internal:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+  mongodb_backup:
+  qdrant_data:
+  qdrant_snapshots:
+  caddy_data:
+  caddy_config:

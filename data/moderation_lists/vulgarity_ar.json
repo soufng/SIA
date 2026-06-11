@@ -1,0 +1,410 @@
+{
+  "insults": [
+    {
+      "term": "غبي",
+      "weight": 2
+    },
+    {
+      "term": "أحمق",
+      "weight": 2
+    },
+    {
+      "term": "معتوه",
+      "weight": 2
+    },
+    {
+      "term": "تافه",
+      "weight": 2
+    },
+    {
+      "term": "حقير",
+      "weight": 2
+    },
+    {
+      "term": "وقح",
+      "weight": 2
+    },
+    {
+      "term": "كذاب",
+      "weight": 2
+    },
+    {
+      "term": "منافق",
+      "weight": 2
+    },
+    {
+      "term": "جبان",
+      "weight": 2
+    },
+    {
+      "term": "فاشل",
+      "weight": 2
+    },
+    {
+      "term": "عديم الفائدة",
+      "weight": 2
+    },
+    {
+      "term": "سخيف",
+      "weight": 2
+    },
+    {
+      "term": "قذر",
+      "weight": 2
+    },
+    {
+      "term": "منحط",
+      "weight": 2
+    },
+    {
+      "term": "بليد",
+      "weight": 2
+    },
+    {
+      "term": "جاهل",
+      "weight": 2
+    },
+    {
+      "term": "مغرور",
+      "weight": 2
+    },
+    {
+      "term": "انتهازي",
+      "weight": 2
+    },
+    {
+      "term": "نصاب",
+      "weight": 2
+    },
+    {
+      "term": "مخادع",
+      "weight": 2
+    },
+    {
+      "term": "ثرثار",
+      "weight": 2
+    },
+    {
+      "term": "مزعج",
+      "weight": 2
+    },
+    {
+      "term": "سيء الأخلاق",
+      "weight": 2
+    },
+    {
+      "term": "قليل الأدب",
+      "weight": 2
+    },
+    {
+      "term": "عديم الاحترام",
+      "weight": 2
+    }
+  ],
+  "offensive_words": [
+    {
+      "term": "لعنة",
+      "weight": 3
+    },
+    {
+      "term": "اللعنة عليك",
+      "weight": 3
+    },
+    {
+      "term": "تباً",
+      "weight": 3
+    },
+    {
+      "term": "اخرس",
+      "weight": 3
+    },
+    {
+      "term": "اسكت",
+      "weight": 3
+    },
+    {
+      "term": "اذهب للجحيم",
+      "weight": 3
+    },
+    {
+      "term": "كلام فارغ",
+      "weight": 3
+    },
+    {
+      "term": "قذارة",
+      "weight": 3
+    },
+    {
+      "term": "وسخ",
+      "weight": 3
+    },
+    {
+      "term": "وسخ الكلام",
+      "weight": 3
+    },
+    {
+      "term": "حقارة",
+      "weight": 3
+    },
+    {
+      "term": "سفالة",
+      "weight": 3
+    },
+    {
+      "term": "وقاحة",
+      "weight": 3
+    },
+    {
+      "term": "قلة أدب",
+      "weight": 3
+    },
+    {
+      "term": "عدواني",
+      "weight": 3
+    },
+    {
+      "term": "إهانة",
+      "weight": 3
+    },
+    {
+      "term": "شتيمة",
+      "weight": 3
+    },
+    {
+      "term": "سب",
+      "weight": 3
+    },
+    {
+      "term": "سافل",
+      "weight": 3
+    },
+    {
+      "term": "نذل",
+      "weight": 3
+    },
+    {
+      "term": "وضيع",
+      "weight": 3
+    },
+    {
+      "term": "مقرف",
+      "weight": 3
+    },
+    {
+      "term": "مخزي",
+      "weight": 3
+    },
+    {
+      "term": "عار عليك",
+      "weight": 3
+    },
+    {
+      "term": "كلام ساقط",
+      "weight": 3
+    }
+  ],
+  "sexual_terms": [
+    {
+      "term": "كلام فاحش",
+      "weight": 4
+    },
+    {
+      "term": "ألفاظ فاحشة",
+      "weight": 4
+    },
+    {
+      "term": "إيحاء جنسي",
+      "weight": 4
+    },
+    {
+      "term": "منحرف",
+      "weight": 4
+    },
+    {
+      "term": "فاسق",
+      "weight": 4
+    },
+    {
+      "term": "فاجر",
+      "weight": 4
+    },
+    {
+      "term": "بذيء",
+      "weight": 4
+    },
+    {
+      "term": "فاحش",
+      "weight": 4
+    },
+    {
+      "term": "عبارة جنسية",
+      "weight": 4
+    },
+    {
+      "term": "تحرش لفظي",
+      "weight": 4
+    },
+    {
+      "term": "وقاحة جنسية",
+      "weight": 4
+    },
+    {
+      "term": "إهانة جنسية",
+      "weight": 4
+    },
+    {
+      "term": "كلام خادش",
+      "weight": 4
+    },
+    {
+      "term": "عبارة خادشة",
+      "weight": 4
+    },
+    {
+      "term": "مزحة جنسية",
+      "weight": 4
+    },
+    {
+      "term": "تلميح جنسي",
+      "weight": 4
+    },
+    {
+      "term": "قذف لفظي",
+      "weight": 4
+    },
+    {
+      "term": "تشهير فاحش",
+      "weight": 4
+    },
+    {
+      "term": "كلام ساقط جنسياً",
+      "weight": 4
+    },
+    {
+      "term": "مصطلح فاضح",
+      "weight": 4
+    },
+    {
+      "term": "وصف فاضح",
+      "weight": 4
+    },
+    {
+      "term": "نكتة فاحشة",
+      "weight": 4
+    },
+    {
+      "term": "سب جنسي",
+      "weight": 4
+    },
+    {
+      "term": "إهانة فاحشة",
+      "weight": 4
+    },
+    {
+      "term": "محتوى خادش",
+      "weight": 4
+    }
+  ],
+  "violent_terms": [
+    {
+      "term": "سأضربك",
+      "weight": 4
+    },
+    {
+      "term": "سأؤذيك",
+      "weight": 4
+    },
+    {
+      "term": "سأكسرك",
+      "weight": 4
+    },
+    {
+      "term": "سأدمرك",
+      "weight": 4
+    },
+    {
+      "term": "سأقتلك",
+      "weight": 4
+    },
+    {
+      "term": "تهديد",
+      "weight": 4
+    },
+    {
+      "term": "أهددك",
+      "weight": 4
+    },
+    {
+      "term": "اعتداء",
+      "weight": 4
+    },
+    {
+      "term": "ضرب مبرح",
+      "weight": 4
+    },
+    {
+      "term": "عنف",
+      "weight": 4
+    },
+    {
+      "term": "سحق",
+      "weight": 4
+    },
+    {
+      "term": "تكسير",
+      "weight": 4
+    },
+    {
+      "term": "انتقام",
+      "weight": 4
+    },
+    {
+      "term": "انتقام عنيف",
+      "weight": 4
+    },
+    {
+      "term": "سفك دم",
+      "weight": 4
+    },
+    {
+      "term": "خنق",
+      "weight": 4
+    },
+    {
+      "term": "طعن",
+      "weight": 4
+    },
+    {
+      "term": "إصابة خطيرة",
+      "weight": 4
+    },
+    {
+      "term": "لكمة",
+      "weight": 4
+    },
+    {
+      "term": "ركلة",
+      "weight": 4
+    },
+    {
+      "term": "صفعة",
+      "weight": 4
+    },
+    {
+      "term": "تهشيم",
+      "weight": 4
+    },
+    {
+      "term": "تصفية حسابات",
+      "weight": 4
+    },
+    {
+      "term": "عدوان",
+      "weight": 4
+    },
+    {
+      "term": "إرهاب لفظي",
+      "weight": 4
+    }
+  ]
+}

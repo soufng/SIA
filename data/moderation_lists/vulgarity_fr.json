@@ -1,0 +1,398 @@
+{
+  "insults": [
+    {
+      "term": "idiot",
+      "weight": 2
+    },
+    {
+      "term": "imbécile",
+      "weight": 2
+    },
+    {
+      "term": "abruti",
+      "weight": 2
+    },
+    {
+      "term": "crétin",
+      "weight": 2
+    },
+    {
+      "term": "andouille",
+      "weight": 2
+    },
+    {
+      "term": "bouffon",
+      "weight": 2
+    },
+    {
+      "term": "clown",
+      "weight": 2
+    },
+    {
+      "term": "minable",
+      "weight": 2
+    },
+    {
+      "term": "nul",
+      "weight": 2
+    },
+    {
+      "term": "incapable",
+      "weight": 2
+    },
+    {
+      "term": "bon à rien",
+      "weight": 2
+    },
+    {
+      "term": "pauvre type",
+      "weight": 2
+    },
+    {
+      "term": "sale type",
+      "weight": 2
+    },
+    {
+      "term": "débile",
+      "weight": 2
+    },
+    {
+      "term": "demeuré",
+      "weight": 2
+    },
+    {
+      "term": "attardé",
+      "weight": 2
+    },
+    {
+      "term": "raté",
+      "weight": 2
+    },
+    {
+      "term": "tocard",
+      "weight": 2
+    },
+    {
+      "term": "loser",
+      "weight": 2
+    },
+    {
+      "term": "parasite",
+      "weight": 2
+    },
+    {
+      "term": "charlatan",
+      "weight": 2
+    },
+    {
+      "term": "menteur",
+      "weight": 2
+    },
+    {
+      "term": "hypocrite",
+      "weight": 2
+    },
+    {
+      "term": "lâche",
+      "weight": 2
+    },
+    {
+      "term": "minus",
+      "weight": 2
+    }
+  ],
+  "offensive_words": [
+    {
+      "term": "merde",
+      "weight": 3
+    },
+    {
+      "term": "putain",
+      "weight": 3
+    },
+    {
+      "term": "bordel",
+      "weight": 3
+    },
+    {
+      "term": "chiant",
+      "weight": 3
+    },
+    {
+      "term": "chier",
+      "weight": 3
+    },
+    {
+      "term": "con",
+      "weight": 3
+    },
+    {
+      "term": "connard",
+      "weight": 3
+    },
+    {
+      "term": "connasse",
+      "weight": 3
+    },
+    {
+      "term": "enfoiré",
+      "weight": 3
+    },
+    {
+      "term": "salaud",
+      "weight": 3
+    },
+    {
+      "term": "salopard",
+      "weight": 3
+    },
+    {
+      "term": "ordure",
+      "weight": 3
+    },
+    {
+      "term": "pourriture",
+      "weight": 3
+    },
+    {
+      "term": "fumier",
+      "weight": 3
+    },
+    {
+      "term": "déchet",
+      "weight": 3
+    },
+    {
+      "term": "casse-toi",
+      "weight": 3
+    },
+    {
+      "term": "ferme-la",
+      "weight": 3
+    },
+    {
+      "term": "ta gueule",
+      "weight": 3
+    },
+    {
+      "term": "dégage",
+      "weight": 3
+    },
+    {
+      "term": "fous le camp",
+      "weight": 3
+    },
+    {
+      "term": "sale menteur",
+      "weight": 3
+    },
+    {
+      "term": "sale hypocrite",
+      "weight": 3
+    },
+    {
+      "term": "espèce de nul",
+      "weight": 3
+    },
+    {
+      "term": "va te faire voir",
+      "weight": 3
+    },
+    {
+      "term": "foutaise",
+      "weight": 3
+    }
+  ],
+  "sexual_terms": [
+    {
+      "term": "nique",
+      "weight": 4
+    },
+    {
+      "term": "va te faire foutre",
+      "weight": 4
+    },
+    {
+      "term": "foutre",
+      "weight": 4
+    },
+    {
+      "term": "branleur",
+      "weight": 4
+    },
+    {
+      "term": "branleuse",
+      "weight": 4
+    },
+    {
+      "term": "obsédé",
+      "weight": 4
+    },
+    {
+      "term": "pervers",
+      "weight": 4
+    },
+    {
+      "term": "sale pervers",
+      "weight": 4
+    },
+    {
+      "term": "gros porc",
+      "weight": 4
+    },
+    {
+      "term": "cochon",
+      "weight": 4
+    },
+    {
+      "term": "débauché",
+      "weight": 4
+    },
+    {
+      "term": "obscène",
+      "weight": 4
+    },
+    {
+      "term": "lubrique",
+      "weight": 4
+    },
+    {
+      "term": "vicieux",
+      "weight": 4
+    },
+    {
+      "term": "allumeuse",
+      "weight": 4
+    },
+    {
+      "term": "chaudasse",
+      "weight": 4
+    },
+    {
+      "term": "tapin",
+      "weight": 4
+    },
+    {
+      "term": "racoleur",
+      "weight": 4
+    },
+    {
+      "term": "racoleuse",
+      "weight": 4
+    },
+    {
+      "term": "propos obscènes",
+      "weight": 4
+    },
+    {
+      "term": "propos salaces",
+      "weight": 4
+    },
+    {
+      "term": "insulte sexuelle",
+      "weight": 4
+    },
+    {
+      "term": "sale obscène",
+      "weight": 4
+    },
+    {
+      "term": "grossier personnage",
+      "weight": 4
+    }
+  ],
+  "violent_terms": [
+    {
+      "term": "je vais te frapper",
+      "weight": 4
+    },
+    {
+      "term": "je vais te casser",
+      "weight": 4
+    },
+    {
+      "term": "je vais te détruire",
+      "weight": 4
+    },
+    {
+      "term": "je vais te tuer",
+      "weight": 4
+    },
+    {
+      "term": "tabasser",
+      "weight": 4
+    },
+    {
+      "term": "écraser",
+      "weight": 4
+    },
+    {
+      "term": "massacrer",
+      "weight": 4
+    },
+    {
+      "term": "exploser la tête",
+      "weight": 4
+    },
+    {
+      "term": "casser la gueule",
+      "weight": 4
+    },
+    {
+      "term": "claque",
+      "weight": 4
+    },
+    {
+      "term": "baffe",
+      "weight": 4
+    },
+    {
+      "term": "coup de poing",
+      "weight": 4
+    },
+    {
+      "term": "coup de pied",
+      "weight": 4
+    },
+    {
+      "term": "étrangler",
+      "weight": 4
+    },
+    {
+      "term": "défoncer",
+      "weight": 4
+    },
+    {
+      "term": "fracasser",
+      "weight": 4
+    },
+    {
+      "term": "agresser",
+      "weight": 4
+    },
+    {
+      "term": "attaque",
+      "weight": 4
+    },
+    {
+      "term": "violence gratuite",
+      "weight": 4
+    },
+    {
+      "term": "vengeance brutale",
+      "weight": 4
+    },
+    {
+      "term": "règlement de comptes",
+      "weight": 4
+    },
+    {
+      "term": "faire saigner",
+      "weight": 4
+    },
+    {
+      "term": "je vais t’éclater",
+      "weight": 4
+    }
+  ]
+}

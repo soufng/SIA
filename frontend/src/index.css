@@ -1,0 +1,42 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-ccm-parchment text-ccm-ink antialiased;
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+      Roboto, sans-serif;
+  }
+}
+
+@layer utilities {
+  .ccm-gradient {
+    background: linear-gradient(135deg, #c1272d 0%, #8e1b22 100%);
+  }
+  .ccm-gradient-soft {
+    background: linear-gradient(
+      135deg,
+      rgba(193, 39, 45, 0.06) 0%,
+      rgba(0, 98, 51, 0.04) 100%
+    );
+  }
+  .nav-link-active {
+    color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.16);
+  }
+  .nav-link-idle {
+    color: rgba(255, 255, 255, 0.78);
+  }
+  .nav-link-idle:hover {
+    color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+}

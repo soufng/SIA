@@ -1,0 +1,444 @@
+{
+    "insults":  [
+                    {
+                        "term":  "حمار",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "كلخ",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "مكلخ",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "حلوف",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "مريض",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "مسطي",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "مهبول",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "خايب",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "ولد الحرام",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "بنت الحرام",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "حقار",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "شفار",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "كذاب",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "منافق",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "خواف",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "فاشل",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "ما نافعش",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "قليل الحيا",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "بلا حشمة",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "وسخ",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "مقود عليك",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "وجهك قاصح",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "ما عندك عقل",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "خنز",
+                        "weight":  2
+                    },
+                    {
+                        "term":  "حشومة عليك",
+                        "weight":  2
+                    }
+                ],
+    "offensive_words":  [
+                            {
+                                "term":  "سير تقود",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "تقود",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "سير بحالك",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "سد فمك",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "سكوت",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "بلا زواق",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "الهضرة الخايبة",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "كلام زنقاوي",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "وسخ الهضرة",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "قلة الحيا",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "قليل التربية",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "طلعتي ليا فراسي",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "حماق",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "مقزز",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "كرفس",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "نوض سير",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "ما تسوا والو",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "ما عندك قيمة",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "خامج",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "داير فيها",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "وجه الزفت",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "قوالب",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "تبهدايل",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "بهدلة",
+                                "weight":  3
+                            },
+                            {
+                                "term":  "عياق",
+                                "weight":  3
+                            }
+                        ],
+    "sexual_terms":  [
+                         {
+                             "term":  "كلام حامض",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "هضرة حامضة",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "هضرة خاسرة",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "قلة الحشمة",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "باسل",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "موسخ",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "منحرف",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "عيب هاد الهضرة",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "كلام ديال العيب",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "تلميح خايب",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "تحرش بالكلام",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "معاكسة خايبة",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "هضرة فاحشة",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "كلام ساقط",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "نكتة خاسرة",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "إهانة حامضة",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "سب حامض",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "كلام ماشي نقي",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "عبارة حشومية",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "كلام خادش",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "هضرة ديال الزنقة",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "قلة الأدب",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "بلا حيا بلا حشمة",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "مصطلح خاسر",
+                             "weight":  4
+                         },
+                         {
+                             "term":  "كلام عيب",
+                             "weight":  4
+                         }
+                     ],
+    "violent_terms":  [
+                          {
+                              "term":  "نضربك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "غادي نضربك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نهرسك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نكسرك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نقتلك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نطحنك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نعفط عليك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نفرشك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نخنقك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نشرملك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "ضرب",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "تشرميل",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "عنف",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "تهديد",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "خصام",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "حساب عسير",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "تصفية الحسابات",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نجيب ليك الصداع",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نخليك تندم",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نوريك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نخرج عليك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نخليك تسكت",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نفرعك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "نرميك",
+                              "weight":  4
+                          },
+                          {
+                              "term":  "دمك يسيل",
+                              "weight":  4
+                          }
+                      ],
+    "profanity":  [
+                      {
+                          "term":  "قحاب",
+                          "weight":  4
+                      },
+                      {
+                          "term":  "زوامل",
+                          "weight":  4
+                      },
+                      {
+                          "term":  "زامل",
+                          "weight":  4
+                      },
+                      {
+                          "term":  "9hab",
+                          "weight":  4
+                      },
+                      {
+                          "term":  "qhab",
+                          "weight":  4
+                      },
+                      {
+                          "term":  "zamel",
+                          "weight":  4
+                      },
+                      {
+                          "term":  "zawamel",
+                          "weight":  4
+                      },
+                      {
+                          "term":  "zwamel",
+                          "weight":  4
+                      }
+                  ]
+}

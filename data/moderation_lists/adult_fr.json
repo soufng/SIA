@@ -1,0 +1,410 @@
+{
+  "sexual_terms": [
+    {
+      "term": "contenu adulte",
+      "weight": 3
+    },
+    {
+      "term": "contenu sexuel",
+      "weight": 3
+    },
+    {
+      "term": "contenu explicite",
+      "weight": 3
+    },
+    {
+      "term": "scène intime",
+      "weight": 3
+    },
+    {
+      "term": "nudité",
+      "weight": 3
+    },
+    {
+      "term": "nu",
+      "weight": 3
+    },
+    {
+      "term": "nue",
+      "weight": 3
+    },
+    {
+      "term": "corps nu",
+      "weight": 3
+    },
+    {
+      "term": "désir sexuel",
+      "weight": 3
+    },
+    {
+      "term": "excitation sexuelle",
+      "weight": 3
+    },
+    {
+      "term": "relation sexuelle",
+      "weight": 3
+    },
+    {
+      "term": "rapport sexuel",
+      "weight": 3
+    },
+    {
+      "term": "acte sexuel",
+      "weight": 3
+    },
+    {
+      "term": "plaisir sexuel",
+      "weight": 3
+    },
+    {
+      "term": "orgasme",
+      "weight": 3
+    },
+    {
+      "term": "masturbation",
+      "weight": 3
+    },
+    {
+      "term": "préliminaires",
+      "weight": 3
+    },
+    {
+      "term": "érotisme",
+      "weight": 3
+    },
+    {
+      "term": "érotique",
+      "weight": 3
+    },
+    {
+      "term": "sensuel explicite",
+      "weight": 3
+    },
+    {
+      "term": "fantasme sexuel",
+      "weight": 3
+    },
+    {
+      "term": "libido",
+      "weight": 3
+    },
+    {
+      "term": "attirance sexuelle",
+      "weight": 3
+    },
+    {
+      "term": "proposition sexuelle",
+      "weight": 3
+    },
+    {
+      "term": "allusion sexuelle",
+      "weight": 3
+    }
+  ],
+  "explicit_acts": [
+    {
+      "term": "pénétration",
+      "weight": 5
+    },
+    {
+      "term": "fellation",
+      "weight": 5
+    },
+    {
+      "term": "cunnilingus",
+      "weight": 5
+    },
+    {
+      "term": "sodomie",
+      "weight": 5
+    },
+    {
+      "term": "rapport oral",
+      "weight": 5
+    },
+    {
+      "term": "sexe oral",
+      "weight": 5
+    },
+    {
+      "term": "sexe anal",
+      "weight": 5
+    },
+    {
+      "term": "sexe vaginal",
+      "weight": 5
+    },
+    {
+      "term": "position sexuelle",
+      "weight": 5
+    },
+    {
+      "term": "orgie",
+      "weight": 5
+    },
+    {
+      "term": "partouze",
+      "weight": 5
+    },
+    {
+      "term": "strip-tease",
+      "weight": 5
+    },
+    {
+      "term": "se déshabiller",
+      "weight": 5
+    },
+    {
+      "term": "caresse intime",
+      "weight": 5
+    },
+    {
+      "term": "attouchement sexuel",
+      "weight": 5
+    },
+    {
+      "term": "jeu sexuel",
+      "weight": 5
+    },
+    {
+      "term": "scène de lit",
+      "weight": 5
+    },
+    {
+      "term": "relation charnelle",
+      "weight": 5
+    },
+    {
+      "term": "baiser explicite",
+      "weight": 5
+    },
+    {
+      "term": "embrassade érotique",
+      "weight": 5
+    },
+    {
+      "term": "rapport intime",
+      "weight": 5
+    },
+    {
+      "term": "acte intime",
+      "weight": 5
+    },
+    {
+      "term": "pratique sexuelle",
+      "weight": 5
+    },
+    {
+      "term": "simulation sexuelle",
+      "weight": 5
+    },
+    {
+      "term": "description sexuelle",
+      "weight": 5
+    }
+  ],
+  "body_terms": [
+    {
+      "term": "seins",
+      "weight": 4
+    },
+    {
+      "term": "poitrine nue",
+      "weight": 4
+    },
+    {
+      "term": "fesses",
+      "weight": 4
+    },
+    {
+      "term": "parties intimes",
+      "weight": 4
+    },
+    {
+      "term": "organes génitaux",
+      "weight": 4
+    },
+    {
+      "term": "sexe masculin",
+      "weight": 4
+    },
+    {
+      "term": "sexe féminin",
+      "weight": 4
+    },
+    {
+      "term": "pénis",
+      "weight": 4
+    },
+    {
+      "term": "vagin",
+      "weight": 4
+    },
+    {
+      "term": "vulve",
+      "weight": 4
+    },
+    {
+      "term": "testicules",
+      "weight": 4
+    },
+    {
+      "term": "anus",
+      "weight": 4
+    },
+    {
+      "term": "zone intime",
+      "weight": 4
+    },
+    {
+      "term": "sous-vêtements sexy",
+      "weight": 4
+    },
+    {
+      "term": "lingerie sexy",
+      "weight": 4
+    },
+    {
+      "term": "corps dénudé",
+      "weight": 4
+    },
+    {
+      "term": "silhouette nue",
+      "weight": 4
+    },
+    {
+      "term": "peau nue",
+      "weight": 4
+    },
+    {
+      "term": "pose suggestive",
+      "weight": 4
+    },
+    {
+      "term": "regard lubrique",
+      "weight": 4
+    },
+    {
+      "term": "gestes suggestifs",
+      "weight": 4
+    },
+    {
+      "term": "attitude sexuelle",
+      "weight": 4
+    },
+    {
+      "term": "tenue provocante",
+      "weight": 4
+    },
+    {
+      "term": "photo intime",
+      "weight": 4
+    },
+    {
+      "term": "image intime",
+      "weight": 4
+    }
+  ],
+  "solicitation_terms": [
+    {
+      "term": "rencontre sexuelle",
+      "weight": 4
+    },
+    {
+      "term": "plan intime",
+      "weight": 4
+    },
+    {
+      "term": "plan sexe",
+      "weight": 4
+    },
+    {
+      "term": "escort",
+      "weight": 4
+    },
+    {
+      "term": "prostitution",
+      "weight": 4
+    },
+    {
+      "term": "service sexuel",
+      "weight": 4
+    },
+    {
+      "term": "annonce adulte",
+      "weight": 4
+    },
+    {
+      "term": "chat érotique",
+      "weight": 4
+    },
+    {
+      "term": "message coquin",
+      "weight": 4
+    },
+    {
+      "term": "sexting",
+      "weight": 4
+    },
+    {
+      "term": "photo nue",
+      "weight": 4
+    },
+    {
+      "term": "vidéo intime",
+      "weight": 4
+    },
+    {
+      "term": "appel sexy",
+      "weight": 4
+    },
+    {
+      "term": "caméra adulte",
+      "weight": 4
+    },
+    {
+      "term": "webcam adulte",
+      "weight": 4
+    },
+    {
+      "term": "club échangiste",
+      "weight": 4
+    },
+    {
+      "term": "site adulte",
+      "weight": 4
+    },
+    {
+      "term": "film pornographique",
+      "weight": 4
+    },
+    {
+      "term": "pornographie",
+      "weight": 4
+    },
+    {
+      "term": "porno",
+      "weight": 4
+    },
+    {
+      "term": "revue adulte",
+      "weight": 4
+    },
+    {
+      "term": "contenu nsfw",
+      "weight": 4
+    },
+    {
+      "term": "image pornographique",
+      "weight": 4
+    },
+    {
+      "term": "vidéo pornographique",
+      "weight": 4
+    },
+    {
+      "term": "scène pornographique",
+      "weight": 4
+    }
+  ]
+}

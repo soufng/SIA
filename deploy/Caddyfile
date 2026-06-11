@@ -1,0 +1,57 @@
+# SPM — reverse proxy Caddy
+#
+# Caddy s'occupe de :
+#   - terminaison TLS (certificats Let's Encrypt automatiques)
+#   - redirection HTTP → HTTPS
+#   - propagation des headers X-Forwarded-* (slowapi en a besoin pour
+#     l'identification correcte du client par IP)
+#   - en-têtes de sécurité (HSTS, X-Content-Type-Options, X-Frame-Options)
+#
+# Avant de démarrer en prod, remplacez `spm.example.org` par votre vrai
+# domaine et exportez l'email pour Let's Encrypt :
+#   export ACME_EMAIL=ops@votredomaine.tld
+#
+# Lancement :
+#   docker compose -f docker-compose.prod.yml up -d
+
+{
+    # Email pour Let's Encrypt — défini via la variable ACME_EMAIL côté
+    # docker-compose. Sans elle, Caddy utilise un compte anonyme.
+    email {$ACME_EMAIL}
+}
+
+spm.example.org {
+    # En-têtes de sécurité partagés par toutes les routes.
+    header {
+        # HSTS : oblige le navigateur à parler HTTPS pendant 1 an.
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        # Empêche le browser de "sniffer" un autre Content-Type.
+        X-Content-Type-Options "nosniff"
+        # Refuse l'embedding dans une iframe externe (clickjacking).
+        X-Frame-Options "DENY"
+        # Reduit les fuites via Referer.
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Désactive les API du navigateur dont l'app n'a pas besoin.
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        # Caddy met "Server: Caddy" sinon — on n'a aucune raison de le révéler.
+        -Server
+    }
+
+    # API FastAPI sous /api/v1 — proxy vers le service backend.
+    reverse_proxy /api/* backend:8000 {
+        # Propagation des headers nécessaires côté Python.
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # SPA statique servie par un volume monté dans le conteneur Caddy
+    # (ou par un container nginx léger si vous préférez).
+    handle {
+        root * /srv/spm-frontend
+        try_files {path} /index.html
+        file_server
+    }
+
+    encode zstd gzip
+}

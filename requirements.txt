@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pymongo
+qdrant-client
+sentence-transformers
+PyMuPDF
+python-dotenv
+pydantic
+slowapi
