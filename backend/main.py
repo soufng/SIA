@@ -25,6 +25,8 @@ ROUTE_MODULES = [
     "backend.api.v1.routes.plagiarism",
     "backend.api.v1.routes.moderation",
     "backend.api.v1.routes.scenarios",
+    "backend.api.v1.routes.users",
+    "backend.api.v1.routes.audit_log",
 ]
 
 

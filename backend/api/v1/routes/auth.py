@@ -15,6 +15,12 @@ from backend.api.v1.dependencies import (
 )
 from backend.core.config import settings
 from backend.core.rate_limit import limiter
+from backend.repositories.audit_log_repository import (
+    AuditLogRepository,
+    EVENT_LOGIN_FAILURE,
+    EVENT_LOGIN_SUCCESS,
+)
+from backend.repositories.users_repository import UsersRepository
 from backend.services.auth_service import (
     AuthenticationError,
     AuthService,
@@ -52,12 +58,29 @@ class LoginResponse(BaseModel):
     otp_used: bool = False
 
 
+def get_audit_log_repository() -> AuditLogRepository:
+    return AuditLogRepository()
+
+
+def get_users_repository() -> UsersRepository:
+    return UsersRepository()
+
+
+def _client_ip(request: Request) -> str | None:
+    fw = request.headers.get("x-forwarded-for")
+    if fw:
+        return fw.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
 @router.post("/login", response_model=LoginResponse)
 @limiter.limit("10/minute")
 def login(
     request: Request,
     body: LoginRequest,
     service: AuthService = Depends(get_auth_service),
+    audit: AuditLogRepository = Depends(get_audit_log_repository),
+    users: UsersRepository = Depends(get_users_repository),
 ) -> LoginResponse:
     """Validate credentials and return a signed JWT.
 
@@ -97,15 +120,47 @@ def login(
         ) from None
     except AuthenticationError as exc:
         logger.info("Failed login attempt for username=%r", body.username)
+        try:
+            audit.append(
+                event_type=EVENT_LOGIN_FAILURE,
+                user_id=None,
+                username=body.username,
+                ip=_client_ip(request),
+                details={"reason": str(exc)},
+            )
+        except Exception:  # pragma: no cover - audit best effort
+            logger.debug("Audit append failed for login failure", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
+
+    # Audit + résolution du compte (pour le username canonique).
+    canonical_username = service.admin_username
+    user_id: str | None = None
+    try:
+        db_user = users.get_by_username(body.username)
+        if db_user is not None:
+            canonical_username = db_user.get("username") or canonical_username
+            user_id = db_user.get("user_id")
+    except Exception:  # pragma: no cover - mongo blip
+        logger.debug("Could not resolve user after login", exc_info=True)
+    try:
+        audit.append(
+            event_type=EVENT_LOGIN_SUCCESS,
+            user_id=user_id,
+            username=canonical_username,
+            ip=_client_ip(request),
+            details={"otp_used": bool(service.otp_enabled and service.otp_secret)},
+        )
+    except Exception:  # pragma: no cover
+        logger.debug("Audit append failed for login success", exc_info=True)
+
     return LoginResponse(
         access_token=token,
         expires_in_minutes=service.jwt_expiry_minutes,
-        username=service.admin_username,
+        username=canonical_username,
         otp_used=bool(service.otp_enabled and service.otp_secret),
     )
 

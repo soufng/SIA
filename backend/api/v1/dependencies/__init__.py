@@ -7,7 +7,13 @@ need to guard themselves with bearer-token authentication.
 from backend.api.v1.dependencies.auth import (
     CurrentUser,
     get_auth_service,
+    require_role,
     require_user,
 )
 
-__all__ = ["CurrentUser", "get_auth_service", "require_user"]
+__all__ = [
+    "CurrentUser",
+    "get_auth_service",
+    "require_role",
+    "require_user",
+]

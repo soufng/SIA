@@ -15,10 +15,14 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 from pymongo.errors import PyMongoError
 
-from backend.api.v1.dependencies import require_user
+from backend.api.v1.dependencies import CurrentUser, require_user
 from backend.core.config import settings
 from backend.core.rate_limit import limiter
 from backend.repositories.analysis_repository import AnalysisRepository
+from backend.repositories.audit_log_repository import (
+    AuditLogRepository,
+    EVENT_SCENARIO_UPLOAD,
+)
 from backend.repositories.jobs_repository import JobsRepository
 from backend.services.analysis_service import AnalysisService
 from backend.services.job_runner import run_analysis_job
@@ -105,6 +109,40 @@ def get_jobs_repository() -> JobsRepository:
     return JobsRepository()
 
 
+def get_audit_log_repository() -> AuditLogRepository:
+    """Return an AuditLogRepository instance for dependency injection."""
+    return AuditLogRepository()
+
+
+def _client_ip(request: Request) -> str | None:
+    fw = request.headers.get("x-forwarded-for")
+    if fw:
+        return fw.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
+def _audit_scenario_upload(
+    audit: AuditLogRepository,
+    actor: CurrentUser | None,
+    request: Request,
+    *,
+    scenario_id: str | None,
+    filename: str | None,
+    flavour: str,
+) -> None:
+    try:
+        audit.append(
+            event_type=EVENT_SCENARIO_UPLOAD,
+            user_id=actor.user_id if actor else None,
+            username=actor.username if actor else None,
+            target_id=scenario_id,
+            ip=_client_ip(request),
+            details={"filename": filename, "flavour": flavour},
+        )
+    except Exception:  # pragma: no cover - audit best-effort
+        logger.debug("Audit append failed for scenario_upload", exc_info=True)
+
+
 def _read_and_validate_pdf(file: UploadFile | None) -> bytes:
     """Common pre-flight checks shared by sync and async upload endpoints."""
     if file is None:
@@ -138,6 +176,8 @@ async def upload_and_analyze(
     upload_service: UploadService = Depends(get_upload_service),
     analysis_service: AnalysisService = Depends(get_analysis_service),
     analysis_repository: AnalysisRepository = Depends(get_analysis_repository),
+    audit: AuditLogRepository = Depends(get_audit_log_repository),
+    actor: CurrentUser = Depends(require_user),
 ) -> dict[str, Any]:
     """Upload a PDF file and run the complete scenario analysis.
 
@@ -203,6 +243,14 @@ async def upload_and_analyze(
         )
         analysis_repository.save_result(_build_history_document(analysis_result))
 
+        _audit_scenario_upload(
+            audit,
+            actor,
+            request,
+            scenario_id=scenario_id,
+            filename=file.filename,
+            flavour="sync",
+        )
         logger.info("Upload and analysis completed. scenario_id=%s", scenario_id)
         return {
             "success": True,
@@ -254,6 +302,8 @@ async def upload_and_queue_analysis(
     analysis_service: AnalysisService = Depends(get_analysis_service),
     analysis_repository: AnalysisRepository = Depends(get_analysis_repository),
     jobs_repository: JobsRepository = Depends(get_jobs_repository),
+    audit: AuditLogRepository = Depends(get_audit_log_repository),
+    actor: CurrentUser = Depends(require_user),
 ) -> dict[str, Any]:
     """Accept a PDF, persist it, enqueue the analysis and return a job id.
 
@@ -303,6 +353,14 @@ async def upload_and_queue_analysis(
         history_document_builder=_build_history_document,
     )
 
+    _audit_scenario_upload(
+        audit,
+        actor,
+        request,
+        scenario_id=scenario_id,
+        filename=file.filename,
+        flavour="async",
+    )
     logger.info(
         "Queued analysis job_id=%s scenario_id=%s file=%s",
         job["job_id"],
