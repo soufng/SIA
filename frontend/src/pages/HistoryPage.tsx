@@ -186,15 +186,13 @@ function KpiCard({
 
 function MiniBar({
   value,
-  unit = "%",
 }: {
   value: number;
   unit?: "%" | "/100";
 }) {
-  const pct =
-    unit === "%"
-      ? Math.max(0, Math.min(100, value <= 1 ? value * 100 : value))
-      : Math.max(0, Math.min(100, value));
+  // Les scores backend peuvent arriver en 0..1 (fraction) ou 0..100 (%).
+  // On normalise systématiquement en pourcentage entier.
+  const pct = Math.max(0, Math.min(100, value <= 1 ? value * 100 : value));
   const color =
     pct >= 75
       ? "bg-red-500"
@@ -203,7 +201,7 @@ function MiniBar({
         : pct > 0
           ? "bg-emerald-500"
           : "bg-slate-200";
-  const display = unit === "%" ? `${pct.toFixed(2)}%` : `${pct.toFixed(2)} / 100`;
+  const display = `${Math.round(pct)}%`;
   return (
     <div className="space-y-1">
       <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
@@ -287,7 +285,7 @@ function HistoryRow({
           <div className="hidden md:flex items-center gap-1 text-xs text-slate-500">
             <Search className="h-3.5 w-3.5" />
             <span className="font-mono">
-              {(row.similarity <= 1 ? row.similarity * 100 : row.similarity).toFixed(2)}%
+              {Math.round(row.similarity <= 1 ? row.similarity * 100 : row.similarity)}%
             </span>
           </div>
           <ChevronDown
@@ -474,11 +472,7 @@ export function HistoryPage() {
   const openReport = (row: Row) => {
     if (!row.fullAnalysis) return;
     setAnalysis(row.fullAnalysis, row.scenarioId);
-    // Pass an explicit hint so the analyse page doesn't reset the store
-    // we just populated. Normal navigation to /upload (menu, refresh, …)
-    // does NOT carry this flag, so the previous analyse is wiped as the
-    // user expects.
-    navigate("/upload", { state: { keepResults: true } });
+    navigate("/results", { state: { keepResults: true } });
   };
 
   return (
@@ -501,7 +495,7 @@ export function HistoryPage() {
           >
             {isFetching ? "Actualisation…" : "Actualiser"}
           </Button>
-          <Button onClick={() => navigate("/upload")}>
+          <Button onClick={() => navigate("/results")}>
             <Upload className="h-4 w-4" />
             Nouvelle analyse
           </Button>
@@ -603,7 +597,7 @@ export function HistoryPage() {
             <p className="text-sm text-slate-500">
               Lancez votre première analyse pour la voir apparaître ici.
             </p>
-            <Button onClick={() => navigate("/upload")}>
+            <Button onClick={() => navigate("/results")}>
               <Upload className="h-4 w-4" />
               Démarrer une analyse
             </Button>

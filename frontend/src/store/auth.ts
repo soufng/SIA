@@ -145,7 +145,7 @@ export const useAuthStore = create<AuthStore>()(
 
       attachUnauthorizedListener() {
         if (typeof window === "undefined") return;
-        window.addEventListener("spm:unauthorized", () => {
+        window.addEventListener("sia:unauthorized", () => {
           set({
             username: null,
             userId: null,
@@ -156,7 +156,7 @@ export const useAuthStore = create<AuthStore>()(
       },
     }),
     {
-      name: "spm.auth",
+      name: "sia.auth",
       partialize: (s) => ({
         username: s.username,
         userId: s.userId,

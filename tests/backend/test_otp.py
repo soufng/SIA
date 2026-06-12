@@ -69,11 +69,11 @@ def test_verify_code_tolerates_whitespace_and_dashes() -> None:
 
 def test_provisioning_uri_format() -> None:
     uri = totp_module.provisioning_uri(
-        KNOWN_SECRET, account_name="admin", issuer="SPM-CCM"
+        KNOWN_SECRET, account_name="admin", issuer="SIA-CCM"
     )
-    assert uri.startswith("otpauth://totp/SPM-CCM%3Aadmin?")
+    assert uri.startswith("otpauth://totp/SIA-CCM%3Aadmin?")
     assert "secret=JBSWY3DPEHPK3PXP" in uri
-    assert "issuer=SPM-CCM" in uri
+    assert "issuer=SIA-CCM" in uri
     assert "algorithm=SHA1" in uri
     assert "digits=6" in uri
     assert "period=30" in uri
@@ -106,7 +106,7 @@ def _configure_auth(monkeypatch: pytest.MonkeyPatch, *, otp_enabled: bool) -> No
         config_module.settings, "AUTH_OTP_SECRET", KNOWN_SECRET, raising=False
     )
     monkeypatch.setattr(
-        config_module.settings, "AUTH_OTP_ISSUER", "SPM-CCM", raising=False
+        config_module.settings, "AUTH_OTP_ISSUER", "SIA-CCM", raising=False
     )
     monkeypatch.setattr(
         config_module.settings, "AUTH_ENABLED", True, raising=False
@@ -191,7 +191,7 @@ def test_login_route_returns_enrollment_info_on_otp_required(
     detail = resp.json()["detail"]
     assert detail["requires_otp"] is True
     assert detail["account"] == "admin"
-    assert detail["issuer"] == "SPM-CCM"
+    assert detail["issuer"] == "SIA-CCM"
     assert detail["secret"] == KNOWN_SECRET
     assert detail["provisioning_uri"].startswith("otpauth://totp/")
     assert "secret=" in detail["provisioning_uri"]

@@ -33,10 +33,10 @@ ROUTE_MODULES = [
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Log application startup and shutdown events."""
-    logger.info("Starting SPM FastAPI application.")
+    logger.info("Starting SIA FastAPI application.")
     yield
     close_mongodb_client()
-    logger.info("Stopping SPM FastAPI application.")
+    logger.info("Stopping SIA FastAPI application.")
 
 
 def create_app() -> FastAPI:
@@ -46,7 +46,7 @@ def create_app() -> FastAPI:
         Configured FastAPI application instance.
     """
     app = FastAPI(
-        title="SPM API",
+        title="SIA API",
         description=(
             "API backend pour l'analyse de scenarios PDF, la detection de "
             "plagiat et la moderation de contenu."
@@ -74,7 +74,7 @@ def create_app() -> FastAPI:
     @app.get("/", tags=["root"])
     def root() -> dict[str, str]:
         """Return a simple API welcome message."""
-        return {"message": "SPM API is running"}
+        return {"message": "SIA API is running"}
 
     return app
 

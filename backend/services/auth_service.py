@@ -90,15 +90,15 @@ class AuthService:
         ).strip()
         self.otp_issuer = (
             otp_issuer if otp_issuer is not None else settings.AUTH_OTP_ISSUER
-        ).strip() or "SPM-CCM"
+        ).strip() or "SIA-CCM"
         if _DEFAULT_SECRET_MARKER in self.jwt_secret:
             logger.warning(
-                "SPM_JWT_SECRET uses the default placeholder. "
+                "SIA_JWT_SECRET uses the default placeholder. "
                 "Set a real secret in production!"
             )
         if self.otp_enabled and not self.otp_secret:
             logger.warning(
-                "SPM_OTP_ENABLED=true but SPM_OTP_SECRET is empty. "
+                "SIA_OTP_ENABLED=true but SIA_OTP_SECRET is empty. "
                 "Generate one with `python -m backend.core.totp generate`."
             )
 
@@ -249,7 +249,7 @@ class AuthService:
             raise AuthenticationError(
                 "Aucun secret OTP configuré côté serveur. "
                 "Génère-en un avec `python -m backend.core.totp generate` puis "
-                "exporte-le via SPM_OTP_SECRET."
+                "exporte-le via SIA_OTP_SECRET."
             )
         return provisioning_uri(
             self.otp_secret,

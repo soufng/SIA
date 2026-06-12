@@ -1,7 +1,7 @@
 """Re-index every saved analysis into Qdrant.
 
-Use this script after switching ``SPM_EMBEDDING_MODEL`` (and the matching
-``SPM_EMBEDDING_VECTOR_SIZE``). Workflow:
+Use this script after switching ``SIA_EMBEDDING_MODEL`` (and the matching
+``SIA_EMBEDDING_VECTOR_SIZE``). Workflow:
 
     python scripts/reset_qdrant_collection.py   # drop + recreate with new size
     python scripts/reindex_qdrant.py            # re-embed and re-upsert

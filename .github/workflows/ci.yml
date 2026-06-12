@@ -42,7 +42,7 @@ jobs:
 
       - name: Run pytest
         env:
-          SPM_ENV: development
+          SIA_ENV: development
         run: pytest tests/ -q --tb=short
 
   # -------------------------------------------------------------------------
@@ -103,7 +103,7 @@ jobs:
           context: .
           push: false
           load: true
-          tags: spm-backend:ci
+          tags: sia-backend:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -112,21 +112,21 @@ jobs:
           # Vérifie que l'image démarre l'API et répond bien sur /health.
           # Mongo/Qdrant ne sont pas joignables ici donc on accepte aussi
           # bien un 200 qu'un 503 — l'important est que l'application boot.
-          docker run -d --name spm_ci -p 8000:8000 \
-            -e SPM_ENV=development \
-            -e SPM_OTP_ENABLED=false \
-            spm-backend:ci
+          docker run -d --name sia_ci -p 8000:8000 \
+            -e SIA_ENV=development \
+            -e SIA_OTP_ENABLED=false \
+            sia-backend:ci
           for i in $(seq 1 30); do
             if curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/ \
                 | grep -E "^(200|503)$" >/dev/null; then
               echo "Backend responded after ${i}s"
-              docker logs spm_ci | tail -20
-              docker rm -f spm_ci
+              docker logs sia_ci | tail -20
+              docker rm -f sia_ci
               exit 0
             fi
             sleep 1
           done
           echo "Backend did not respond within 30s — dumping logs"
-          docker logs spm_ci || true
-          docker rm -f spm_ci
+          docker logs sia_ci || true
+          docker rm -f sia_ci
           exit 1

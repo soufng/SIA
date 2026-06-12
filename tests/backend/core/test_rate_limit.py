@@ -14,8 +14,8 @@ def _reset_slowapi(monkeypatch: pytest.MonkeyPatch):
     """Reload the rate_limit module for each test so limit counters reset."""
     # Memory storage par défaut → un counter par process. On veut un état
     # propre entre tests : on reload pour ré-instancier le ``Limiter``.
-    monkeypatch.delenv("SPM_RATE_LIMIT_STORAGE", raising=False)
-    monkeypatch.delenv("SPM_RATE_LIMIT_DEFAULT", raising=False)
+    monkeypatch.delenv("SIA_RATE_LIMIT_STORAGE", raising=False)
+    monkeypatch.delenv("SIA_RATE_LIMIT_DEFAULT", raising=False)
     import backend.core.rate_limit as rl
 
     importlib.reload(rl)

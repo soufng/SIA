@@ -61,7 +61,7 @@ def main() -> int:
     if isinstance(provider, MockLLMProvider):
         print(
             "  ⚠ MockLLMProvider est actif — aucun vrai LLM ne sera contacté. "
-            "Vérifie ton .env (SPM_RAG_LLM_PROVIDER) ou que l'API key / le "
+            "Vérifie ton .env (SIA_RAG_LLM_PROVIDER) ou que l'API key / le "
             "service Ollama est bien accessible."
         )
         return 1
@@ -115,10 +115,10 @@ def main() -> int:
         print("⚠ Le LLM a échoué → fallback déterministe activé.")
         print(f"  Erreur exacte : {report['llm']['error']}")
         print("  Pistes :")
-        print(f"    - Bumper SPM_RAG_LLM_TIMEOUT_SECONDS (actuel "
+        print(f"    - Bumper SIA_RAG_LLM_TIMEOUT_SECONDS (actuel "
               f"{settings.ADVANCED_RAG_TIMEOUT_SECONDS}s) à ≥ {int(elapsed * 1.5)}s")
         print("    - Vérifier la RAM disponible (le modèle peut être déchargé)")
-        print("    - Réduire SPM_RAG_MAX_PASSAGES pour un prompt plus court")
+        print("    - Réduire SIA_RAG_MAX_PASSAGES pour un prompt plus court")
         print("    - Essayer un modèle plus petit (llama3.2:1b ou qwen2.5:1.5b)")
         return 5
 

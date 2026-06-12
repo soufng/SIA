@@ -1,4 +1,4 @@
-"""Backup quotidien de la collection Qdrant SPM.
+"""Backup quotidien de la collection Qdrant SIA.
 
 Qdrant expose une API native de snapshot — un fichier ``.snapshot`` par
 collection, contenant l'index HNSW + les payloads. On le télécharge en
@@ -34,7 +34,7 @@ logger = logging.getLogger("backup_qdrant")
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Backup SPM Qdrant collection.")
+    parser = argparse.ArgumentParser(description="Backup SIA Qdrant collection.")
     parser.add_argument(
         "--url",
         default="http://127.0.0.1:6333",

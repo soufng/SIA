@@ -1,6 +1,6 @@
 """Bearer-token authentication dependency for v1 routes.
 
-When ``SPM_AUTH_ENABLED=false`` the dependency short-circuits and returns
+When ``SIA_AUTH_ENABLED=false`` the dependency short-circuits and returns
 a synthetic anonymous user so the existing dev workflow keeps working
 without changes.
 """
@@ -47,7 +47,7 @@ def require_user(
 ) -> CurrentUser:
     """Validate the ``Authorization: Bearer …`` header and return the user.
 
-    When auth is globally disabled via ``SPM_AUTH_ENABLED=false`` the
+    When auth is globally disabled via ``SIA_AUTH_ENABLED=false`` the
     dependency returns a synthetic anonymous user — no header is required.
     """
     if not settings.AUTH_ENABLED:
@@ -101,7 +101,7 @@ def require_role(*allowed: str):
         @router.get("/edit", dependencies=[Depends(require_role("admin", "reviewer"))])
         def edit(): ...
 
-    Quand ``SPM_AUTH_ENABLED=false`` la dépendance laisse passer
+    Quand ``SIA_AUTH_ENABLED=false`` la dépendance laisse passer
     (utile pour le dev local).
     """
     allowed_set = {str(r).strip().lower() for r in allowed if r}

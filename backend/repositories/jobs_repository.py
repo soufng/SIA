@@ -138,7 +138,7 @@ class JobsRepository:
     def _get_database(self) -> Database:
         if self.database is not None:
             return self.database
-        return get_database(self.mongodb_url, self.database_name)
+        return get_database()
 
 
 def _utcnow_iso() -> str:

@@ -49,7 +49,7 @@ def _build_service(history: list[dict[str, Any]]) -> StrictSimilarityService:
     repo = MagicMock()
     repo.list_history.return_value = history
     local = LocalSimilarityService(
-        raw_dir="/tmp/spm-tests",
+        raw_dir="/tmp/sia-tests",
         pdf_service=MagicMock(),
         text_cleaning_service=MagicMock(),
         chunking_service=MagicMock(),

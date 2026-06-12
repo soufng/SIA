@@ -9,19 +9,25 @@ import type {
   UserRole,
 } from "./types";
 
+// En dev (vite serve), on laisse baseURL vide pour que les requetes partent
+// vers la meme origine que la page (http://localhost:5173 ou 127.0.0.1:5173).
+// Le proxy Vite (vite.config.ts) les forwarde alors vers FastAPI en
+// same-origin -> pas de CORS, pas d'ERR_NETWORK lie au preflight.
+// En prod (vite build), import.meta.env.DEV est false et VITE_API_BASE_URL
+// (positionne au build) prend le relais.
 export const DEFAULT_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
-  "http://127.0.0.1:8000";
+  (import.meta.env.DEV ? "" : "http://127.0.0.1:8000");
 
 export function getBaseUrl(): string {
-  return localStorage.getItem("spm.apiBaseUrl") || DEFAULT_BASE_URL;
+  return localStorage.getItem("sia.apiBaseUrl") || DEFAULT_BASE_URL;
 }
 
 export function setBaseUrl(url: string): void {
-  localStorage.setItem("spm.apiBaseUrl", url);
+  localStorage.setItem("sia.apiBaseUrl", url);
 }
 
-const AUTH_TOKEN_KEY = "spm.authToken";
+const AUTH_TOKEN_KEY = "sia.authToken";
 
 export function getAuthToken(): string | null {
   try {
@@ -64,7 +70,7 @@ function client() {
       if (error.response?.status === 401) {
         setAuthToken(null);
         // Notify the rest of the app (Zustand store listens to this event).
-        window.dispatchEvent(new CustomEvent("spm:unauthorized"));
+        window.dispatchEvent(new CustomEvent("sia:unauthorized"));
       }
       return Promise.reject(error);
     }
@@ -192,8 +198,30 @@ export async function fetchOTPSetup(): Promise<OTPSetupResponse> {
 
 function extractError(error: unknown): string {
   if (error instanceof AxiosError) {
-    if (error.code === "ERR_NETWORK")
-      return `Impossible de joindre le backend FastAPI sur ${getBaseUrl()}.`;
+    if (error.code === "ERR_NETWORK") {
+      // Plusieurs causes possibles pour un ERR_NETWORK : on ajoute des
+      // pistes pour que l'operateur sache ou regarder en premier.
+      const baseUrl = getBaseUrl();
+      const isHttps = window.location.protocol === "https:";
+      const targetHttp = baseUrl.startsWith("http://");
+      const hints = [
+        `1) Le backend FastAPI tourne-t-il sur ${baseUrl} ?`,
+        "2) Verifier l'onglet Reseau du navigateur (CORS, status reel).",
+      ];
+      if (isHttps && targetHttp) {
+        hints.push(
+          "3) La page est en HTTPS mais le backend en HTTP : Mixed " +
+            "Content bloque par le navigateur.",
+        );
+      }
+      return (
+        `Impossible de joindre le backend FastAPI sur ${baseUrl}. ` +
+        hints.join(" ")
+      );
+    }
+    if (error.code === "ECONNABORTED") {
+      return `Le backend n'a pas repondu a temps (timeout) sur ${getBaseUrl()}.`;
+    }
     const data = error.response?.data as
       | { detail?: string | Array<{ msg?: string }>; error?: string }
       | undefined;
@@ -224,10 +252,13 @@ export async function analyzePdf(file: File): Promise<AnalyzeResponse> {
   const form = new FormData();
   form.append("file", file, file.name);
   try {
+    // On NE fixe PAS Content-Type ici : axios le pose automatiquement avec
+    // le boundary correct quand le body est un FormData. Le fixer a la main
+    // sans boundary fait echouer le parse cote serveur et le navigateur
+    // remonte un ERR_NETWORK silencieux.
     const { data } = await client().post<AnalyzeResponse>(
       "/api/v1/uploads/analyze",
       form,
-      { headers: { "Content-Type": "multipart/form-data" } }
     );
     return data;
   } catch (e) {
@@ -266,10 +297,10 @@ export async function analyzePdfAsync(file: File): Promise<AnalyzeJobAck> {
   const form = new FormData();
   form.append("file", file, file.name);
   try {
+    // Cf. analyzePdf : on laisse axios calculer le boundary du multipart.
     const { data } = await client().post<AnalyzeJobAck>(
       "/api/v1/uploads/analyze/async",
       form,
-      { headers: { "Content-Type": "multipart/form-data" } }
     );
     return data;
   } catch (e) {
@@ -382,7 +413,7 @@ export async function generateAdvancedReport(
       analysis ? { analysis } : {},
       // Local LLMs (Ollama / Mistral / Llama 8B) can take 60-180s on CPU,
       // and longer on cold start. Give the backend plenty of headroom
-      // (≥ SPM_RAG_LLM_TIMEOUT_SECONDS server-side, default 180s).
+      // (≥ SIA_RAG_LLM_TIMEOUT_SECONDS server-side, default 180s).
       { timeout: 600_000 }
     );
     return data;

@@ -1,4 +1,4 @@
-"""Backup quotidien de la base MongoDB SPM.
+"""Backup quotidien de la base MongoDB SIA.
 
 Stratégie : un dump par jour avec ``mongodump``, compressé, horodaté,
 rotation automatique (rétention configurable). Aucune dépendance Python
@@ -8,10 +8,10 @@ exotique — on shell-out vers ``mongodump`` qui est dispo dans l'image
 Usage :
     python scripts/backup_mongodb.py
     python scripts/backup_mongodb.py --output /var/backups/mongo --keep 14
-    python scripts/backup_mongodb.py --uri mongodb://user:pw@host:27017/spm
+    python scripts/backup_mongodb.py --uri mongodb://user:pw@host:27017/sia
 
-Sortie : ``OUTPUT/spm_YYYYMMDD_HHMMSS.archive.gz``. Pour restaurer :
-    mongorestore --gzip --archive=spm_20260101_023000.archive.gz
+Sortie : ``OUTPUT/sia_YYYYMMDD_HHMMSS.archive.gz``. Pour restaurer :
+    mongorestore --gzip --archive=sia_20260101_023000.archive.gz
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ logger = logging.getLogger("backup_mongodb")
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Backup SPM MongoDB.")
+    parser = argparse.ArgumentParser(description="Backup SIA MongoDB.")
     parser.add_argument(
         "--uri",
         default="mongodb://127.0.0.1:27017",
@@ -41,8 +41,8 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--database",
-        default="spm",
-        help="Nom de la base à dumper (défaut : spm).",
+        default="sia",
+        help="Nom de la base à dumper (défaut : sia).",
     )
     parser.add_argument(
         "--output",
@@ -90,7 +90,7 @@ def _rotate(output_dir: Path, keep: int) -> None:
     if keep <= 0:
         return
     archives = sorted(
-        output_dir.glob("spm_*.archive.gz"),
+        output_dir.glob("sia_*.archive.gz"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
@@ -110,7 +110,7 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    archive = output_dir / f"spm_{timestamp}.archive.gz"
+    archive = output_dir / f"sia_{timestamp}.archive.gz"
 
     _run_dump(args.uri, args.database, archive)
     size_mb = archive.stat().st_size / (1024 * 1024)

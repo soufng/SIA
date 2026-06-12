@@ -1,4 +1,4 @@
-# SPM — Plateforme d'analyse de scénarios
+# SIA — Plateforme d'analyse de scénarios
 
 API et interface web pour l'analyse de scénarios PDF (CCM) : extraction,
 détection de plagiat sémantique, modération multilingue, contrôle des
@@ -46,11 +46,11 @@ Variables non-évidentes :
 
 | Variable | Effet |
 |---|---|
-| `SPM_ENV` | `development` (défaut) ou `production`. En prod, l'API refuse de démarrer avec les secrets par défaut. |
-| `SPM_UPLOAD_MAX_MB` | Taille max d'un PDF accepté (défaut : 20 Mo). |
-| `SPM_PLAGIARISM_SIMILARITY_THRESHOLD` | Seuil cosine pour qu'un match Qdrant soit retenu (défaut : 0.60). |
-| `SPM_RATE_LIMIT_STORAGE` | `memory://` (défaut, mono-instance) ou `redis://host:6379` pour du multi-worker. |
-| `SPM_RAG_LLM_PROVIDER` | `ollama` / `openai` / `anthropic` / `none`. Tombe sur un template déterministe si l'API est injoignable. |
+| `SIA_ENV` | `development` (défaut) ou `production`. En prod, l'API refuse de démarrer avec les secrets par défaut. |
+| `SIA_UPLOAD_MAX_MB` | Taille max d'un PDF accepté (défaut : 20 Mo). |
+| `SIA_PLAGIARISM_SIMILARITY_THRESHOLD` | Seuil cosine pour qu'un match Qdrant soit retenu (défaut : 0.60). |
+| `SIA_RATE_LIMIT_STORAGE` | `memory://` (défaut, mono-instance) ou `redis://host:6379` pour du multi-worker. |
+| `SIA_RAG_LLM_PROVIDER` | `ollama` / `openai` / `anthropic` / `none`. Tombe sur un template déterministe si l'API est injoignable. |
 
 Cf. [`.env.example`](.env.example) pour la liste complète.
 
@@ -70,10 +70,10 @@ cd frontend && npm run typecheck && npm run build
 # 1. Générer les secrets
 python scripts/rotate_secrets.py > /tmp/secrets.env
 cp .env.example .env.production
-# Coller les secrets dans .env.production et y mettre SPM_ENV=production
+# Coller les secrets dans .env.production et y mettre SIA_ENV=production
 
 # 2. Builder
-docker build -t spm-backend:prod .
+docker build -t sia-backend:prod .
 cd frontend && npm ci && npm run build && cd ..
 
 # 3. Lancer la stack
@@ -98,7 +98,7 @@ Avant le premier `up`, ajustez le domaine et l'e-mail Let's Encrypt dans
 Cron quotidien recommandé :
 
 ```cron
-0 2 * * * /opt/spm/scripts/backup_all.sh >> /var/log/spm-backup.log 2>&1
+0 2 * * * /opt/sia/scripts/backup_all.sh >> /var/log/sia-backup.log 2>&1
 ```
 
 [`scripts/backup_all.sh`](scripts/backup_all.sh) appelle :

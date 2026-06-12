@@ -43,7 +43,7 @@ class LoginRequest(BaseModel):
         max_length=12,
         description=(
             "6-digit TOTP code from Google Authenticator. Required when "
-            "SPM_OTP_ENABLED=true."
+            "SIA_OTP_ENABLED=true."
         ),
     )
 
@@ -190,7 +190,7 @@ def otp_setup(
 
     Protected by :func:`require_user` so anyone fishing for the secret has to
     first be authenticated. The endpoint never auto-generates a secret: the
-    operator must explicitly opt in by setting ``SPM_OTP_SECRET``.
+    operator must explicitly opt in by setting ``SIA_OTP_SECRET``.
     """
     try:
         uri = service.build_otp_provisioning_uri(account_override=user.username)

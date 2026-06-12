@@ -107,8 +107,16 @@ _SUBJECT_PATTERNS: dict[str, list[str]] = {
         r"\broi\b",
         r"\bmonarque\b",
         r"\btr[ôo]ne\b",
-        r"\bmohammed vi\b",
-        r"\bmohamed vi\b",
+        r"\bmohammed\s+vi\b",
+        r"\bmohamed\s+vi\b",
+        r"\bm6\b",
+        # Anciens rois
+        r"\bhassan\s+ii\b",
+        r"\bhassan\s+2\b",
+        r"\bmohammed\s+v\b",
+        r"\bmohamed\s+v\b",
+        r"\banciens?\s+rois?\b",
+        r"\bfeu\s+(?:le\s+)?roi\b",
         r"\bpalais royal\b",
         r"\bcouronne\b",
         r"\bsidna\b",
@@ -118,6 +126,9 @@ _SUBJECT_PATTERNS: dict[str, list[str]] = {
         r"الملكية",
         r"العرش",
         r"المخزن",
+        r"الحسن الثاني",
+        r"محمد الخامس",
+        r"محمد السادس",
     ],
     "democratic_choice": [
         r"\bd[ée]mocrat\w+\b",
@@ -155,11 +166,27 @@ _TRIGGERS: dict[str, list[str]] = {
         r"\bbombarder\b",
         r"\bmassacrer?\b",
         r"\bex[ée]cuter\b",
-        # Separatism
+        # Separatism — atteinte à l'intégrité territoriale (souveraineté)
         r"\bind[ée]pendance\s+du\s+sahara\b",
         r"\bsahara\s+libre\b",
-        r"\bpolisario\b",
+        r"\bpoli[sz]ario\b",  # accepte "polisario" et "polizario"
         r"\br[ée]publique\s+sahraouie\b",
+        r"\brasd\b",
+        r"\bfront\s+poli[sz]ario\b",
+        # Négations de souveraineté marocaine sur le Sahara
+        r"\bsahara\s+(?:n['’ ]?est\s+pas|n['’ ]?appartient\s+pas)\b",
+        r"\bn['’ ]?appartient\s+pas\s+au\s+maroc\b",
+        r"\boccupation\s+marocaine\b",
+        r"\boccup[ée]e?\s+par\s+le\s+maroc\b",
+        r"\bcolonisation\s+marocaine\b",
+        r"\bterritoires?\s+occup[ée]s?\s+par\s+le\s+maroc\b",
+        # Reconnaissance d'une autre tutelle sur le Sahara
+        r"\b(?:appartient|revient)\s+(?:au|aux|à\s+l[ae']?\s*)\s*poli[sz]ario\b",
+        r"\bsahara\s+sahraoui\b",
+        # Mort / abolition de la religion ou des anciens rois
+        r"\bmort\s+(?:à|au|aux)\s+(?:l['’ ]?)?islam\b",
+        r"\bbr[ûu]ler\s+le\s+coran\b",
+        r"\binsulter\s+le\s+proph[èe]te\b",
         # Hate / mass insults
         r"\btous\s+des\s+terroristes\b",
         r"\bsales?\s+arabes?\b",

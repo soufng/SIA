@@ -1,4 +1,4 @@
-# SPM — reverse proxy Caddy
+# SIA — reverse proxy Caddy
 #
 # Caddy s'occupe de :
 #   - terminaison TLS (certificats Let's Encrypt automatiques)
@@ -7,7 +7,7 @@
 #     l'identification correcte du client par IP)
 #   - en-têtes de sécurité (HSTS, X-Content-Type-Options, X-Frame-Options)
 #
-# Avant de démarrer en prod, remplacez `spm.example.org` par votre vrai
+# Avant de démarrer en prod, remplacez `sia.example.org` par votre vrai
 # domaine et exportez l'email pour Let's Encrypt :
 #   export ACME_EMAIL=ops@votredomaine.tld
 #
@@ -20,7 +20,7 @@
     email {$ACME_EMAIL}
 }
 
-spm.example.org {
+sia.example.org {
     # En-têtes de sécurité partagés par toutes les routes.
     header {
         # HSTS : oblige le navigateur à parler HTTPS pendant 1 an.
@@ -48,7 +48,7 @@ spm.example.org {
     # SPA statique servie par un volume monté dans le conteneur Caddy
     # (ou par un container nginx léger si vous préférez).
     handle {
-        root * /srv/spm-frontend
+        root * /srv/sia-frontend
         try_files {path} /index.html
         file_server
     }

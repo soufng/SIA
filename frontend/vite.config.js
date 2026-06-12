@@ -14,6 +14,12 @@ export default defineConfig({
             "/api": {
                 target: "http://127.0.0.1:8000",
                 changeOrigin: true,
+                // Pas de timeout cote proxy : les gros PDF peuvent prendre plusieurs
+                // minutes a uploader sur des reseaux lents et on ne veut pas que le
+                // navigateur recoive un ERR_NETWORK parce que Vite a coupe avant le
+                // backend.
+                timeout: 0,
+                proxyTimeout: 0,
             },
         },
     },

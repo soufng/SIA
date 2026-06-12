@@ -267,7 +267,7 @@ function StrictMatchBanner({ match }: { match: StrictMatch | undefined }) {
         </div>
       </div>
 
-      {matched && (
+      {matched && match.verdict !== "different" && (
         <div className="rounded-md bg-white/70 border border-current/20 p-3 text-sm space-y-3">
           <p className="text-xs uppercase tracking-wide opacity-70 font-semibold">
             Scénario antérieur correspondant
@@ -328,7 +328,7 @@ function StrictMatchBanner({ match }: { match: StrictMatch | undefined }) {
         </div>
       )}
 
-      {match.extras && match.extras.length > 0 && (
+      {match.extras && match.extras.length > 0 && match.verdict !== "different" && (
         <details className="rounded-md bg-white/40 border border-current/20 p-2 text-xs">
           <summary className="cursor-pointer font-medium">
             Voir les {match.extras.length} autre(s) analyse(s) proche(s)
@@ -348,7 +348,7 @@ function StrictMatchBanner({ match }: { match: StrictMatch | undefined }) {
         </details>
       )}
 
-      {matched && (
+      {matched && match.verdict !== "different" && (
         <div className="flex justify-end pt-1">
           <Button
             variant="outline"
@@ -545,9 +545,7 @@ function IndicatorBar({
         </span>
         <span className="flex items-center gap-2">
           <span className="font-mono text-sm font-semibold tabular-nums text-ccm-ink">
-            {indicator.unit === "%"
-              ? `${animated.toFixed(2)}%`
-              : `${animated.toFixed(2)} / 100`}
+            {`${Math.round(animated)}%`}
           </span>
           <Badge
             className={cn(
@@ -600,8 +598,56 @@ function SummarySection({ analysis }: { analysis: Analysis }) {
   const plagiarism = analysis.plagiarism ?? {};
   const profanity = analysis.profanity ?? {};
   const adult = analysis.adult_content ?? {};
+  const moroccan = analysis.moroccan_constants ?? {};
 
-  const risk = String(rag.risk_level ?? "unknown");
+  // Backend scores arrivent en 0..1 (fraction) OU en 0..100 (pourcentage)
+  // selon le pipeline. On normalise toujours en 0..100 pour l'affichage.
+  const toPercent = (raw: unknown): number => {
+    const n = Number(raw ?? 0);
+    if (!Number.isFinite(n)) return 0;
+    return n <= 1 ? n * 100 : n;
+  };
+  const plagiarismScore = toPercent(
+    plagiarism.global_similarity_score ?? plagiarism.score ?? 0,
+  );
+  const profanityScore = toPercent(profanity.profanity_score);
+  const adultScore = toPercent(adult.adult_content_score);
+  const moroccanScore = toPercent(moroccan.score);
+  const isDuplicate = Boolean(plagiarism.exact_duplicate);
+  const duplicateCount = Number(plagiarism.duplicate_count ?? 0);
+  const duplicateScore = isDuplicate ? 100 : 0;
+
+  // Score global pondéré : addition des cinq indicateurs
+  //   plagiat 30% · doublon 20% · vulgarité 15% · contenu adulte 15%
+  //   · constantes Maroc 20%
+  let globalRiskScore = Math.min(
+    100,
+    Math.max(
+      0,
+      0.3 * plagiarismScore +
+        0.2 * duplicateScore +
+        0.15 * profanityScore +
+        0.15 * adultScore +
+        0.2 * moroccanScore,
+    ),
+  );
+
+  // Plancher : si le backend a escaladé le risque (atteinte aux constantes
+  // nationales, etc.), le score global ne peut pas être inférieur au seuil
+  // ÉLEVÉ — sinon la jauge contredit le badge.
+  if (rag.risk_level_floored_by) {
+    globalRiskScore = Math.max(globalRiskScore, 75);
+  }
+
+  // Le niveau de risque éditorial vient du backend (rag.risk_level) ; si
+  // absent, on dérive un niveau du score global agrégé.
+  const aggregatedRisk =
+    globalRiskScore >= 75
+      ? "high"
+      : globalRiskScore >= 40
+        ? "medium"
+        : "low";
+  const risk = String(rag.risk_level ?? aggregatedRisk);
   const theme = summaryRiskTheme(risk);
   const Icon =
     risk === "high"
@@ -610,29 +656,30 @@ function SummarySection({ analysis }: { analysis: Analysis }) {
         ? AlertTriangle
         : CheckCircle2;
 
-  // Normalise the global similarity score to a 0..100 percent.
-  const rawScore = Number(
-    plagiarism.global_similarity_score ?? plagiarism.score ?? 0,
-  );
-  const scorePct = rawScore > 1 ? rawScore : rawScore * 100;
-  const profanityScore = Number(profanity.profanity_score ?? 0);
-  const adultScore = Number(adult.adult_content_score ?? 0);
-
-  const animatedScore = useCountUp(scorePct);
+  const animatedScore = useCountUp(globalRiskScore);
 
   // RadialBar gauge data — single value rendered as an arc.
   const gaugeData = [
     {
       name: "score",
-      value: Math.max(0, Math.min(100, scorePct)),
+      value: Math.max(0, Math.min(100, globalRiskScore)),
       fill: theme.ring,
     },
   ];
 
   const indicators: SummaryIndicator[] = [
     {
-      label: "Similarité globale",
-      value: scorePct,
+      label: isDuplicate
+        ? `Doublon exact (${duplicateCount} copie${duplicateCount > 1 ? "s" : ""})`
+        : "Doublon exact",
+      value: duplicateScore,
+      unit: "/100",
+      thresholds: { medium: 50, high: 100 },
+      icon: ClipboardCheck,
+    },
+    {
+      label: "Plagiat (similarité globale)",
+      value: plagiarismScore,
       unit: "%",
       thresholds: { medium: 40, high: 75 },
       icon: Search,
@@ -640,18 +687,40 @@ function SummarySection({ analysis }: { analysis: Analysis }) {
     {
       label: "Vulgarité",
       value: profanityScore,
-      unit: "/100",
+      unit: "%",
       thresholds: { medium: 20, high: 60 },
       icon: ShieldAlert,
     },
     {
       label: "Contenu adulte",
       value: adultScore,
-      unit: "/100",
+      unit: "%",
       thresholds: { medium: 20, high: 60 },
       icon: AlertTriangle,
     },
+    {
+      label: "Constantes nationales Maroc",
+      value: moroccanScore,
+      unit: "/100",
+      thresholds: { medium: 20, high: 60 },
+      icon: Landmark,
+    },
   ];
+
+  // Paragraphe de synthèse : résume les métriques et explique comment le
+  // score global est obtenu.
+  const aggregatedParagraph =
+    `Le score global de risque s'élève à ${Math.round(globalRiskScore)}%, ` +
+    `obtenu par addition pondérée des cinq indicateurs : ` +
+    `${isDuplicate ? `doublon exact détecté (${duplicateCount} copie${duplicateCount > 1 ? "s antérieures" : " antérieure"})` : "aucun doublon exact"}, ` +
+    `plagiat ${Math.round(plagiarismScore)}%, ` +
+    `vulgarité ${Math.round(profanityScore)}%, ` +
+    `contenu adulte ${Math.round(adultScore)}%, ` +
+    `constantes Maroc ${Math.round(moroccanScore)}%.` +
+    (rag.risk_level_floored_by
+      ? ` Le score a été élevé au seuil ÉLEVÉ (75%) parce que la vérification ` +
+        `des constantes nationales a déclenché une escalade automatique.`
+      : "");
 
   return (
     <Card
@@ -703,7 +772,7 @@ function SummarySection({ analysis }: { analysis: Analysis }) {
             </ResponsiveContainer>
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
               <span className="text-[10px] uppercase tracking-wider text-slate-500">
-                Similarite
+                Score global
               </span>
               <span
                 className="font-mono text-3xl font-bold tabular-nums"
@@ -766,6 +835,23 @@ function SummarySection({ analysis }: { analysis: Analysis }) {
               {rag.summary ?? "Aucun résumé disponible."}
             </p>
 
+            {/* Paragraphe d'agrégation : addition pondérée des 4 indicateurs */}
+            <div
+              className={cn(
+                "rounded-md border bg-white/80 px-3 py-2.5 text-sm leading-relaxed",
+                theme.border,
+              )}
+            >
+              <p className="text-[10px] uppercase tracking-wider font-semibold text-slate-500 mb-1">
+                Score global agrégé
+              </p>
+              <p className="text-slate-700">{aggregatedParagraph}</p>
+              <p className="mt-1 text-[10px] text-slate-400 italic">
+                Pondération : plagiat 30% · doublon 20% · vulgarité 15% ·
+                contenu adulte 15% · constantes Maroc 20%.
+              </p>
+            </div>
+
             {rag.risk_justification &&
               rag.risk_justification !== rag.summary && (
                 <blockquote
@@ -792,7 +878,8 @@ function SummarySection({ analysis }: { analysis: Analysis }) {
               Indicateurs clés
             </p>
             <p className="text-[10px] text-slate-400">
-              seuils : 40 / 75 sur la similarité — 20 / 60 sur la modération
+              seuils : 50 / 100 sur le doublon — 40 / 75 sur le plagiat —
+              20 / 60 sur la modération
             </p>
           </div>
           {indicators.map((ind) => (
@@ -1431,7 +1518,6 @@ function ModerationSection({ analysis }: { analysis: Analysis }) {
   const vulgMatches: VulgarityMatch[] = profanity.vulgarity_matches ?? [];
   const nudityMatches: NudityMatch[] = adult.nudity_matches ?? [];
   const grouped = useMemo(() => groupVulgarity(vulgMatches), [vulgMatches]);
-  const adultScore = Number(adult.adult_content_score ?? 0);
 
   return (
     <Card>
@@ -1512,43 +1598,6 @@ function ModerationSection({ analysis }: { analysis: Analysis }) {
             </Table>
           </div>
         )}
-
-        {/* Contenu adulte — résumé */}
-        <div>
-          <h3 className="text-sm font-semibold text-ccm-ink mb-2">
-            Contenu adulte / nudité
-          </h3>
-          <Table>
-            <TBody>
-              <Tr>
-                <Td className="font-medium text-slate-600 w-1/3">Score</Td>
-                <Td className="font-mono">{adultScore.toFixed(2)} / 100</Td>
-              </Tr>
-              <Tr>
-                <Td className="font-medium text-slate-600">Niveau</Td>
-                <Td>
-                  <Badge className={riskColor(String(adult.risk_level ?? "low"))}>
-                    {formatRiskLabel(String(adult.risk_level ?? "low"))}
-                  </Badge>
-                </Td>
-              </Tr>
-              <Tr>
-                <Td className="font-medium text-slate-600">Statut</Td>
-                <Td className="text-slate-700">
-                  {adult.adult_content_score && adultScore > 0
-                    ? "Contenu adulte significatif détecté."
-                    : "Aucun contenu adulte significatif détecté."}
-                </Td>
-              </Tr>
-              {Array.isArray(adult.detected_terms) && adult.detected_terms.length > 0 && (
-                <Tr>
-                  <Td className="font-medium text-slate-600">Termes détectés</Td>
-                  <Td className="text-slate-700">{adult.detected_terms.join(", ")}</Td>
-                </Tr>
-              )}
-            </TBody>
-          </Table>
-        </div>
 
         {/* Contenu adulte — passages détaillés avec page */}
         {nudityMatches.length > 0 && (
@@ -2006,7 +2055,7 @@ function RagErrorHint({ error }: { error: string }) {
         </a>
         . Recharge le compte (min. 5 $) ou augmente la limite mensuelle.
         Tu peux aussi basculer temporairement sur Ollama via{" "}
-        <code>SPM_RAG_LLM_PROVIDER=ollama</code> dans <code>.env</code>.
+        <code>SIA_RAG_LLM_PROVIDER=ollama</code> dans <code>.env</code>.
       </p>
     );
   }
@@ -2020,7 +2069,7 @@ function RagErrorHint({ error }: { error: string }) {
     return (
       <p className="text-xs mt-2 text-slate-600">
         <strong>Clé API invalide ou rejetée.</strong> Vérifie{" "}
-        <code>SPM_RAG_LLM_API_KEY</code> dans <code>.env</code> (sans
+        <code>SIA_RAG_LLM_API_KEY</code> dans <code>.env</code> (sans
         espaces, sans guillemets) puis redémarre uvicorn. Génère une nouvelle
         clé si nécessaire sur{" "}
         <a
@@ -2039,7 +2088,7 @@ function RagErrorHint({ error }: { error: string }) {
     return (
       <p className="text-xs mt-2 text-slate-600">
         <strong>Modèle introuvable.</strong> Vérifie que{" "}
-        <code>SPM_RAG_LLM_MODEL</code> correspond à un modèle accessible avec
+        <code>SIA_RAG_LLM_MODEL</code> correspond à un modèle accessible avec
         ta clé (ex. <code>gpt-4o-mini</code>, <code>gpt-4o</code>).
       </p>
     );
@@ -2053,7 +2102,7 @@ function RagErrorHint({ error }: { error: string }) {
         <strong>Le LLM n'a pas répondu à temps.</strong> Si tu utilises
         Ollama, vérifie qu'il tourne (<code>ollama serve</code>) et que le
         modèle est warmé. Augmente{" "}
-        <code>SPM_RAG_LLM_TIMEOUT_SECONDS</code> (≥ 600 s pour un 7B/8B sur
+        <code>SIA_RAG_LLM_TIMEOUT_SECONDS</code> (≥ 600 s pour un 7B/8B sur
         CPU). Si tu utilises OpenAI, retente — il s'agit probablement d'un
         pic de latence côté API.
       </p>
@@ -2063,8 +2112,8 @@ function RagErrorHint({ error }: { error: string }) {
     return (
       <p className="text-xs mt-2 text-slate-600">
         <strong>Prompt trop volumineux.</strong> Réduis{" "}
-        <code>SPM_RAG_MAX_PASSAGES</code> (essaie 3) ou{" "}
-        <code>SPM_RAG_LLM_MAX_TOKENS</code> dans <code>.env</code>.
+        <code>SIA_RAG_MAX_PASSAGES</code> (essaie 3) ou{" "}
+        <code>SIA_RAG_LLM_MAX_TOKENS</code> dans <code>.env</code>.
       </p>
     );
   }
@@ -3018,7 +3067,6 @@ function SectionHeader({
 
 const TOC_ITEMS: { id: string; label: string }[] = [
   { id: "synthese", label: "Synthèse" },
-  { id: "scores", label: "Scores" },
   { id: "plagiat", label: "Plagiat" },
   { id: "moderation", label: "Modération" },
   { id: "constantes-maroc", label: "Constantes Maroc" },
@@ -3081,7 +3129,7 @@ export function ResultsPage() {
         <Alert variant="info">
           Aucun résultat disponible. Lancez d'abord une analyse PDF.
         </Alert>
-        <Button onClick={() => navigate("/upload")}>Aller à l'upload</Button>
+        <Button onClick={() => navigate("/")}>Retour à l'accueil</Button>
       </div>
     );
   }
@@ -3124,20 +3172,6 @@ export function ResultsPage() {
         />
         <StatusCards analysis={analysis} />
         <SummarySection analysis={analysis} />
-      </section>
-
-      {/* ---------- 2. Scores & statistiques ---------- */}
-      <section className="space-y-4">
-        <SectionHeader
-          id="scores"
-          icon={BarChart3}
-          title="Scores et statistiques"
-          subtitle="Métriques détaillées et caractéristiques du document analysé."
-        />
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <ScoreTable analysis={analysis} />
-          <DocumentStatsTable analysis={analysis} />
-        </div>
       </section>
 
       {/* ---------- 3. Plagiat ---------- */}

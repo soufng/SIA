@@ -231,6 +231,19 @@ class PlagiarismService:
                 min_chars=400,
                 source_boilerplate_ngrams=boilerplate_ngrams,
             )
+            # A high cosine score on its own is not enough — short or generic
+            # texts routinely score ~0.80 against unrelated passages. We
+            # require at least one real lexical overlap span (>= 4 contiguous
+            # informative tokens, per build_plagiarism_snippet) before
+            # accepting the match as plagiarism.
+            if not snippet_info.get("overlap_text"):
+                logger.debug(
+                    "Ignoring match for chunk_index=%s (score=%.3f) — no lexical overlap with %s.",
+                    chunk_index,
+                    score,
+                    matched_scenario_str or "(unknown)",
+                )
+                continue
             snippet = snippet_info["snippet"]
             matches.append(
                 {

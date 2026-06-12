@@ -3,7 +3,7 @@
 On expose un ``limiter`` unique instancié une fois et réutilisé par toutes
 les routes qui veulent appliquer une limite. Backend de stockage :
 ``memory://`` par défaut (suffisant pour une seule instance). Pour du
-multi-worker, basculer sur ``redis://...`` via ``SPM_RATE_LIMIT_STORAGE``.
+multi-worker, basculer sur ``redis://...`` via ``SIA_RATE_LIMIT_STORAGE``.
 
 Les limites par route sont définies au plus près de leur usage avec le
 décorateur ``@limiter.limit("…/h")`` dans le module de la route.
@@ -27,13 +27,13 @@ logger = logging.getLogger(__name__)
 
 
 def _storage_uri() -> str:
-    return os.getenv("SPM_RATE_LIMIT_STORAGE", "memory://")
+    return os.getenv("SIA_RATE_LIMIT_STORAGE", "memory://")
 
 
-# Limites globales par défaut. Override via env SPM_RATE_LIMIT_DEFAULT.
+# Limites globales par défaut. Override via env SIA_RATE_LIMIT_DEFAULT.
 # Une liste de limites séparées par des virgules (ex. "60/minute,1000/hour").
 def _default_limits() -> list[str]:
-    raw = os.getenv("SPM_RATE_LIMIT_DEFAULT", "120/minute")
+    raw = os.getenv("SIA_RATE_LIMIT_DEFAULT", "120/minute")
     return [chunk.strip() for chunk in raw.split(",") if chunk.strip()]
 
 

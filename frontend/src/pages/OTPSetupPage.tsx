@@ -85,7 +85,7 @@ export function OTPSetupPage() {
           </p>
           <p className="text-xs font-mono">{error}</p>
           <p className="text-xs mt-2 text-slate-600">
-            Vérifie que <code>SPM_OTP_SECRET</code> est défini côté serveur
+            Vérifie que <code>SIA_OTP_SECRET</code> est défini côté serveur
             (génère-le avec{" "}
             <code>python -m backend.core.totp generate</code>).
           </p>

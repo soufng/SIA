@@ -188,7 +188,7 @@ export function LoginPage() {
               Identifiants par défaut (dev) :{" "}
               <code className="font-mono">admin</code> /{" "}
               <code className="font-mono">admin</code>. À changer en
-              production via <code>SPM_ADMIN_PASSWORD_HASH</code>.
+              production via <code>SIA_ADMIN_PASSWORD_HASH</code>.
             </p>
           </form>
         )}

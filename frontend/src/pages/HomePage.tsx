@@ -473,7 +473,13 @@ export function HomePage() {
               standards de production du CCM.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
-              <Button onClick={() => navigate("/upload")}>
+              <Button
+                onClick={() =>
+                  document
+                    .getElementById("upload-form")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                }
+              >
                 <Upload className="h-4 w-4" />
                 Lancer une analyse
               </Button>
@@ -630,7 +636,10 @@ export function HomePage() {
       </section>
 
       {/* ---------- Upload + last analysis ---------- */}
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <section
+        id="upload-form"
+        className="grid grid-cols-1 gap-6 lg:grid-cols-2 scroll-mt-24"
+      >
         <UploadForm />
         <Card>
           <CardContent className="pt-6">
@@ -653,7 +662,7 @@ export function HomePage() {
               {analysis && (
                 <Button
                   variant="outline"
-                  onClick={() => navigate("/upload")}
+                  onClick={() => navigate("/results")}
                 >
                   Rapport complet
                   <ArrowRight className="h-3.5 w-3.5" />
@@ -773,7 +782,7 @@ export function HomePage() {
       <footer className="border-t border-slate-200 pt-6 text-xs text-slate-500">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span>
-            SPM - Plateforme d'analyse de scenarios | Centre Cinematographique
+            SIA - Plateforme d'analyse de scenarios | Centre Cinematographique
             Marocain
           </span>
           <span className="flex items-center gap-2">

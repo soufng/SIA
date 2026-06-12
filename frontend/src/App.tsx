@@ -39,7 +39,7 @@ export default function App() {
               }
             />
             <Route
-              path="/upload"
+              path="/results"
               element={
                 <ProtectedRoute>
                   <UploadPage />
@@ -47,8 +47,8 @@ export default function App() {
               }
             />
             <Route
-              path="/results"
-              element={<Navigate to="/upload" replace />}
+              path="/upload"
+              element={<Navigate to="/results" replace />}
             />
             <Route
               path="/history"
@@ -97,7 +97,7 @@ export default function App() {
       <footer className="border-t border-slate-200 bg-white">
         <div className="mx-auto max-w-7xl px-4 md:px-8 py-4 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-2">
           <p>
-            <span className="font-semibold text-ccm-red">SPM</span> &middot;
+            <span className="font-semibold text-ccm-red">SIA</span> &middot;
             Plateforme d'analyse de scenarios &middot; Centre Cinematographique
             Marocain
           </p>

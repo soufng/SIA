@@ -161,7 +161,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     p_gen = sub.add_parser("generate", help="Generate a new secret + URI")
     p_gen.add_argument("--account", default="admin")
-    p_gen.add_argument("--issuer", default="SPM-CCM")
+    p_gen.add_argument("--issuer", default="SIA-CCM")
 
     p_code = sub.add_parser("code", help="Print the current code for a secret")
     p_code.add_argument("secret")

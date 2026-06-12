@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 interface LogoProps {
   /** Pixel size of the visual mark (the square symbol). */
   size?: number;
-  /** Show the SPM / CCM lockup text next to the mark. */
+  /** Show the SIA / CCM lockup text next to the mark. */
   withText?: boolean;
   /**
    * When true (default) the lockup text uses white-on-red navbar styling.
@@ -42,7 +42,7 @@ export function Logo({
               onDark ? "text-white" : "text-ccm-ink"
             )}
           >
-            SPM{" "}
+            SIA{" "}
             <span
               className={cn(
                 "font-normal",

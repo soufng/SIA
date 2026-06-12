@@ -1,4 +1,4 @@
-"""Trace d'audit immuable des actions clés sur SPM.
+"""Trace d'audit immuable des actions clés sur SIA.
 
 Chaque entrée capture *qui* (user_id + username), *quoi* (event_type),
 *sur quoi* (scenario_id ou target_id), *quand* (horodatage UTC) et

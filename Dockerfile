@@ -1,4 +1,4 @@
-# SPM Backend — image de production
+# SIA Backend — image de production
 #
 # Multi-stage : on installe les deps Python dans une étape "builder" puis
 # on ne garde que le strict nécessaire dans l'image finale. Le modèle
@@ -40,11 +40,11 @@ COPY data/moderation_lists/ ./data/moderation_lists/
 COPY scripts/ ./scripts/
 
 # Tournera comme un user non-root.
-RUN useradd --create-home --uid 1000 spm \
+RUN useradd --create-home --uid 1000 sia \
     && mkdir -p data/raw data/processed \
-    && chown -R spm:spm /app /root/.local
+    && chown -R sia:sia /app /root/.local
 
-USER spm
+USER sia
 
 EXPOSE 8000
 

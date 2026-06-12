@@ -82,14 +82,14 @@ def main() -> int:
     print("Secrets générés — collez ces lignes dans votre .env (ou Vault)")
     print("=" * 72)
     print()
-    print(f"SPM_ADMIN_USERNAME={args.username}")
-    print(f"SPM_ADMIN_PASSWORD_HASH={password_hash}")
-    print(f"SPM_JWT_SECRET={jwt_secret}")
+    print(f"SIA_ADMIN_USERNAME={args.username}")
+    print(f"SIA_ADMIN_PASSWORD_HASH={password_hash}")
+    print(f"SIA_JWT_SECRET={jwt_secret}")
     if otp_secret:
-        print(f"SPM_OTP_ENABLED=true")
-        print(f"SPM_OTP_SECRET={otp_secret}")
+        print(f"SIA_OTP_ENABLED=true")
+        print(f"SIA_OTP_SECRET={otp_secret}")
     else:
-        print("SPM_OTP_ENABLED=false")
+        print("SIA_OTP_ENABLED=false")
     print()
     print("=" * 72)
     print(

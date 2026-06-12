@@ -43,6 +43,6 @@ export const useAnalysisStore = create<AnalysisStore>()(
           lastError: null,
         }),
     }),
-    { name: "spm.analysis" }
+    { name: "sia.analysis" }
   )
 );

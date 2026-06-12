@@ -8,8 +8,8 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
 
-DEFAULT_MONGODB_URL = "mongodb://127.0.0.1:27017/spm"
-DEFAULT_MONGODB_DATABASE = "spm"
+DEFAULT_MONGODB_URL = "mongodb://127.0.0.1:27017/sia"
+DEFAULT_MONGODB_DATABASE = "sia"
 TEST_COLLECTION_NAME = "test_mongodb_connection"
 
 

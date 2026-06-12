@@ -1,4 +1,4 @@
-# SPM — déploiement de production
+# SIA — déploiement de production
 #
 # Diffère de docker-compose.yml (dev) sur quatre points :
 #   1. Le backend tourne dans un conteneur (image à builder via Dockerfile).
@@ -7,7 +7,7 @@
 #   4. Le frontend buildé (dist/) est monté en lecture seule dans Caddy.
 #
 # Avant le premier `up -d` :
-#   - Construisez l'image backend :     docker build -t spm-backend:prod .
+#   - Construisez l'image backend :     docker build -t sia-backend:prod .
 #   - Buildez le frontend :              cd frontend && npm ci && npm run build
 #   - Remplissez le .env.production :   cp .env.example .env.production
 #     (puis `python scripts/rotate_secrets.py` et collez les secrets dedans)
@@ -19,7 +19,7 @@
 services:
   caddy:
     image: caddy:2-alpine
-    container_name: spm_caddy
+    container_name: sia_caddy
     restart: unless-stopped
     ports:
       - "80:80"
@@ -29,34 +29,34 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:-}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./frontend/dist:/srv/spm-frontend:ro
+      - ./frontend/dist:/srv/sia-frontend:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
       - backend
     networks:
-      - spm_internal
+      - sia_internal
 
   backend:
-    image: spm-backend:prod
-    container_name: spm_backend
+    image: sia-backend:prod
+    container_name: sia_backend
     restart: unless-stopped
     env_file:
       - .env.production
     environment:
-      SPM_ENV: production
+      SIA_ENV: production
     depends_on:
       mongodb:
         condition: service_healthy
       qdrant:
         condition: service_started
     networks:
-      - spm_internal
+      - sia_internal
     # Pas de ports: exposés — uniquement joignable via Caddy.
 
   mongodb:
     image: mongo:7
-    container_name: spm_mongodb
+    container_name: sia_mongodb
     restart: unless-stopped
     command: ["--bind_ip_all", "--auth"]
     volumes:
@@ -68,20 +68,20 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - spm_internal
+      - sia_internal
 
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: spm_qdrant
+    container_name: sia_qdrant
     restart: unless-stopped
     volumes:
       - qdrant_data:/qdrant/storage
       - qdrant_snapshots:/qdrant/snapshots
     networks:
-      - spm_internal
+      - sia_internal
 
 networks:
-  spm_internal:
+  sia_internal:
     driver: bridge
 
 volumes:

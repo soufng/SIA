@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, Upload as UploadIcon } from "lucide-react";
 import { Button } from "./ui/button";
@@ -31,6 +32,7 @@ export function UploadForm() {
   const setResponse = useAnalysisStore((s) => s.setResponse);
   const setError = useAnalysisStore((s) => s.setError);
   const lastError = useAnalysisStore((s) => s.lastError);
+  const navigate = useNavigate();
 
   const [progressPct, setProgressPct] = useState(0);
   const [stageLabel, setStageLabel] = useState(FALLBACK_STAGE_LABEL);
@@ -78,6 +80,10 @@ export function UploadForm() {
             state.result_scenario_id ?? state.scenario_id ?? "",
           analysis: state.analysis,
         });
+        // Analyse terminée : on bascule l'utilisateur vers la page de
+        // résultats. L'upload se fait depuis l'accueil ; les rapports
+        // s'affichent sur /results.
+        navigate("/results", { state: { keepResults: true } });
       } else {
         setError(
           "Analyse marquée comme terminée mais aucune donnée n'est " +

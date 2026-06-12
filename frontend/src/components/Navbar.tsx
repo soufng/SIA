@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 
 const baseItems = [
   { to: "/", label: "Accueil", icon: Home },
-  { to: "/upload", label: "Analyser un scenario", icon: FileSearch },
+  { to: "/results", label: "Résultats", icon: FileSearch },
   { to: "/history", label: "Historique", icon: History },
   { to: "/analytics", label: "Statistiques", icon: BarChart3 },
 ];
