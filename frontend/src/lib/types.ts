@@ -247,6 +247,30 @@ export interface HistoryItem {
   rag_report?: RagReport;
 }
 
+// ---------- Admin : users & audit log ----------
+
+export type UserRole = "admin" | "reviewer" | "viewer";
+
+export interface User {
+  user_id: string;
+  username: string;
+  role: UserRole | string;
+  created_at?: string;
+  last_login_at?: string | null;
+  disabled?: boolean;
+}
+
+export interface AuditLogEvent {
+  event_id: string;
+  event_type: string;
+  user_id?: string | null;
+  username?: string | null;
+  target_id?: string | null;
+  ip?: string | null;
+  details?: Record<string, unknown>;
+  timestamp: string;
+}
+
 export interface Statistics {
   total_analyses?: number;
   total_scenarios?: number;

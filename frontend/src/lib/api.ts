@@ -2,8 +2,11 @@ import axios, { AxiosError } from "axios";
 import type {
   Analysis,
   AnalyzeResponse,
+  AuditLogEvent,
   HistoryItem,
   Statistics,
+  User,
+  UserRole,
 } from "./types";
 
 export const DEFAULT_BASE_URL =
@@ -76,6 +79,8 @@ export interface LoginResponse {
   token_type: string;
   expires_in_minutes: number;
   username: string;
+  user_id: string;
+  role: UserRole | string;
   otp_used?: boolean;
 }
 
@@ -381,6 +386,92 @@ export async function generateAdvancedReport(
       { timeout: 600_000 }
     );
     return data;
+  } catch (e) {
+    throw new Error(extractError(e));
+  }
+}
+
+// ---------- Admin : users ----------
+
+export async function fetchUsers(): Promise<User[]> {
+  try {
+    const { data } = await client().get<User[]>("/api/v1/users");
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    throw new Error(extractError(e));
+  }
+}
+
+export interface CreateUserInput {
+  username: string;
+  password: string;
+  role: UserRole;
+}
+
+export async function createUser(input: CreateUserInput): Promise<User> {
+  try {
+    const { data } = await client().post<User>("/api/v1/users", input);
+    return data;
+  } catch (e) {
+    throw new Error(extractError(e));
+  }
+}
+
+export async function updateUserRole(
+  userId: string,
+  role: UserRole,
+): Promise<User> {
+  try {
+    const { data } = await client().patch<User>(
+      `/api/v1/users/${encodeURIComponent(userId)}/role`,
+      { role },
+    );
+    return data;
+  } catch (e) {
+    throw new Error(extractError(e));
+  }
+}
+
+export async function resetUserPassword(
+  userId: string,
+  password: string,
+): Promise<void> {
+  try {
+    await client().post(
+      `/api/v1/users/${encodeURIComponent(userId)}/password`,
+      { password },
+    );
+  } catch (e) {
+    throw new Error(extractError(e));
+  }
+}
+
+export async function deleteUser(userId: string): Promise<void> {
+  try {
+    await client().delete(`/api/v1/users/${encodeURIComponent(userId)}`);
+  } catch (e) {
+    throw new Error(extractError(e));
+  }
+}
+
+// ---------- Admin : audit log ----------
+
+export interface FetchAuditLogParams {
+  limit?: number;
+  user_id?: string;
+  event_type?: string;
+  since?: string;
+}
+
+export async function fetchAuditLog(
+  params: FetchAuditLogParams = {},
+): Promise<AuditLogEvent[]> {
+  try {
+    const { data } = await client().get<AuditLogEvent[]>(
+      "/api/v1/audit-log",
+      { params },
+    );
+    return Array.isArray(data) ? data : [];
   } catch (e) {
     throw new Error(extractError(e));
   }

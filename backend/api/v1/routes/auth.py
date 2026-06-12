@@ -55,6 +55,8 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     expires_in_minutes: int
     username: str
+    user_id: str
+    role: str
     otp_used: bool = False
 
 
@@ -139,11 +141,13 @@ def login(
     # Audit + résolution du compte (pour le username canonique).
     canonical_username = service.admin_username
     user_id: str | None = None
+    role: str = "admin"
     try:
         db_user = users.get_by_username(body.username)
         if db_user is not None:
             canonical_username = db_user.get("username") or canonical_username
             user_id = db_user.get("user_id")
+            role = db_user.get("role") or role
     except Exception:  # pragma: no cover - mongo blip
         logger.debug("Could not resolve user after login", exc_info=True)
     try:
@@ -161,6 +165,8 @@ def login(
         access_token=token,
         expires_in_minutes=service.jwt_expiry_minutes,
         username=canonical_username,
+        user_id=user_id or "env-admin",
+        role=role,
         otp_used=bool(service.otp_enabled and service.otp_secret),
     )
 

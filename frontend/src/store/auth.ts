@@ -23,6 +23,8 @@ export interface OTPEnrollment {
 
 interface AuthStore {
   username: string | null;
+  userId: string | null;
+  role: string | null;
   authEnabled: boolean | null;
   expiresAt: number | null;
   loading: boolean;
@@ -49,6 +51,8 @@ export const useAuthStore = create<AuthStore>()(
   persist(
     (set, get) => ({
       username: null,
+      userId: null,
+      role: null,
       authEnabled: null,
       expiresAt: null,
       loading: false,
@@ -63,6 +67,8 @@ export const useAuthStore = create<AuthStore>()(
           setAuthToken(resp.access_token);
           set({
             username: resp.username,
+            userId: resp.user_id,
+            role: resp.role,
             expiresAt: Date.now() + resp.expires_in_minutes * 60_000,
             error: null,
             otpRequired: false,
@@ -112,6 +118,8 @@ export const useAuthStore = create<AuthStore>()(
         setAuthToken(null);
         set({
           username: null,
+          userId: null,
+          role: null,
           expiresAt: null,
           error: null,
           otpRequired: false,
@@ -138,16 +146,21 @@ export const useAuthStore = create<AuthStore>()(
       attachUnauthorizedListener() {
         if (typeof window === "undefined") return;
         window.addEventListener("spm:unauthorized", () => {
-          // Synchronise the store with the cleared token.
-          set({ username: null, expiresAt: null });
+          set({
+            username: null,
+            userId: null,
+            role: null,
+            expiresAt: null,
+          });
         });
       },
     }),
     {
       name: "spm.auth",
-      // Don't persist transient flags.
       partialize: (s) => ({
         username: s.username,
+        userId: s.userId,
+        role: s.role,
         authEnabled: s.authEnabled,
         expiresAt: s.expiresAt,
       }),

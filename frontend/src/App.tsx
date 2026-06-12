@@ -7,6 +7,8 @@ import { HistoryPage } from "./pages/HistoryPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { OTPSetupPage } from "./pages/OTPSetupPage";
+import { UsersPage } from "./pages/UsersPage";
+import { AuditLogPage } from "./pages/AuditLogPage";
 
 export default function App() {
   const location = useLocation();
@@ -69,6 +71,22 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <OTPSetupPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/users"
+              element={
+                <ProtectedRoute>
+                  <UsersPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/audit-log"
+              element={
+                <ProtectedRoute>
+                  <AuditLogPage />
                 </ProtectedRoute>
               }
             />

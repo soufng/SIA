@@ -10,10 +10,12 @@ import {
   LogOut,
   Menu,
   PlugZap,
+  ScrollText,
   Settings,
   ShieldCheck,
   Trash2,
   User as UserIcon,
+  Users,
   X,
 } from "lucide-react";
 import { Logo } from "./Logo";
@@ -24,16 +26,23 @@ import { useAnalysisStore } from "@/store/analysis";
 import { useAuthStore } from "@/store/auth";
 import { cn } from "@/lib/utils";
 
-const items = [
+const baseItems = [
   { to: "/", label: "Accueil", icon: Home },
   { to: "/upload", label: "Analyser un scenario", icon: FileSearch },
   { to: "/history", label: "Historique", icon: History },
   { to: "/analytics", label: "Statistiques", icon: BarChart3 },
 ];
 
+const adminItems = [
+  { to: "/admin/users", label: "Utilisateurs", icon: Users },
+  { to: "/admin/audit-log", label: "Journal d'audit", icon: ScrollText },
+];
+
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const role = useAuthStore((s) => s.role);
+  const items = role === "admin" ? [...baseItems, ...adminItems] : baseItems;
 
   return (
     <header className="sticky top-0 z-40 ccm-gradient shadow-lg border-b-4 border-ccm-gold">
