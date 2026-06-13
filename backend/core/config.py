@@ -99,6 +99,26 @@ class Settings(BaseSettings):
     ADVANCED_RAG_MAX_PASSAGES: int = Field(default=6, validation_alias="SIA_RAG_MAX_PASSAGES")
     ADVANCED_RAG_TEMPERATURE: float = Field(default=0.2, validation_alias="SIA_RAG_LLM_TEMPERATURE")
     ADVANCED_RAG_TIMEOUT_SECONDS: int = Field(default=45, validation_alias="SIA_RAG_LLM_TIMEOUT_SECONDS")
+    # Multi-query retrieval: LLM rewrites the document into N semantic queries
+    # and we search Qdrant once per query. Off by default so behaviour matches
+    # the current pipeline until the new path is validated in shadow mode.
+    ADVANCED_RAG_MULTI_QUERY_ENABLED: bool = Field(
+        default=False, validation_alias="SIA_RAG_MULTI_QUERY_ENABLED"
+    )
+    ADVANCED_RAG_MULTI_QUERY_COUNT: int = Field(
+        default=4, validation_alias="SIA_RAG_MULTI_QUERY_COUNT"
+    )
+    # LLM reranking: a wider candidate pool is collected (cosine top-N),
+    # then an LLM scores each candidate for editorial relevance to the
+    # uploaded document; the top ``ADVANCED_RAG_MAX_PASSAGES`` are kept.
+    # Off by default — enable once you have a model that produces stable
+    # JSON (Qwen 2.5 14B or larger, Mistral Small, Claude Haiku, etc.).
+    ADVANCED_RAG_RERANK_ENABLED: bool = Field(
+        default=False, validation_alias="SIA_RAG_RERANK_ENABLED"
+    )
+    ADVANCED_RAG_RERANK_POOL_SIZE: int = Field(
+        default=20, validation_alias="SIA_RAG_RERANK_POOL_SIZE"
+    )
 
     # ---- Uploads ----
     # Taille maximale d'un PDF accepté par /uploads/analyze (Mo). 0 désactive.
