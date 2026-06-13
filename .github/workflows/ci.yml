@@ -149,7 +149,7 @@ jobs:
       # Pour main (où on publie ``latest``) on est strict ; pour dev on
       # signale sans bloquer pour ne pas couper l'itération.
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@master
         with:
           image-ref: sia-backend:ci
           format: table

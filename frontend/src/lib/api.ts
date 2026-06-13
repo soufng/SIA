@@ -469,6 +469,7 @@ export async function deleteUser(userId: string): Promise<void> {
 export interface FetchAuditLogParams {
   limit?: number;
   user_id?: string;
+  username?: string;
   event_type?: string;
   since?: string;
 }
