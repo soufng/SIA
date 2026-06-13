@@ -14,7 +14,6 @@ import {
   Settings,
   ShieldCheck,
   Trash2,
-  User as UserIcon,
   Users,
   X,
 } from "lucide-react";

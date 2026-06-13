@@ -30,7 +30,6 @@ from backend.services.strict_similarity_service import StrictSimilarityService
 from backend.services.vector_service import VectorService
 from backend.utils.composite_scoring import (
     format_percent,
-    risk_from_composite,
 )
 
 

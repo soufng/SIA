@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from backend.services.llm_provider import LLMResponse
 from backend.services.llm_reranker import LLMReranker, _parse_score_list

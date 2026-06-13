@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 
 from backend.services.llm_provider import LLMResponse
 from backend.services.multi_query_retriever import (

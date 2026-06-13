@@ -406,7 +406,7 @@ def _http_post_json(
                 f"Connexion au LLM impossible ({reason}).", sensitive_substring
             )
         ) from None
-    except TimeoutError as exc:
+    except TimeoutError:
         raise LLMProviderError(
             _redact(
                 f"Timeout après {timeout}s en attendant la réponse du LLM.",

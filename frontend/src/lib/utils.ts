@@ -19,24 +19,6 @@ export function formatScore(value: unknown, suffix = ""): string {
   return `${Math.round(scaled)}${suffix}`;
 }
 
-export function formatPercent(value: unknown): string {
-  return formatScore(value, "%");
-}
-
-export function formatDate(value: unknown): string {
-  if (!value) return "n/a";
-  const text = String(value);
-  const parsed = new Date(text);
-  if (Number.isNaN(parsed.getTime())) return text;
-  return parsed.toLocaleString("fr-FR", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 export function riskColor(level: string | undefined): string {
   const k = String(level || "").toLowerCase().trim();
   if (

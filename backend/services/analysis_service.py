@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from backend.core.config import settings
-from backend.pipelines.document_pipeline import DocumentContext, DocumentPipeline
+from backend.pipelines.document_pipeline import DocumentPipeline
 from backend.pipelines.moderation_pipeline import ModerationPipeline
 from backend.pipelines.plagiarism_pipeline import PlagiarismPipeline
 from backend.services.adult_content_service import AdultContentService
