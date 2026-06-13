@@ -3,25 +3,18 @@ import { NavLink } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import {
   BarChart3,
-  Check,
   FileSearch,
   History,
   Home,
   LogOut,
   Menu,
-  PlugZap,
   ScrollText,
-  Settings,
   ShieldCheck,
-  Trash2,
   Users,
   X,
 } from "lucide-react";
 import { Logo } from "./Logo";
 import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { checkHealth, getBaseUrl, setBaseUrl } from "@/lib/api";
-import { useAnalysisStore } from "@/store/analysis";
 import { useAuthStore } from "@/store/auth";
 import { cn } from "@/lib/utils";
 
@@ -39,7 +32,6 @@ const adminItems = [
 
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const role = useAuthStore((s) => s.role);
   const items = role === "admin" ? [...baseItems, ...adminItems] : baseItems;
 
@@ -106,7 +98,6 @@ export function Navbar() {
 
         <div className="ml-auto flex items-center gap-1.5">
           <UserMenu />
-          <BackendSettings open={settingsOpen} setOpen={setSettingsOpen} />
           <button
             type="button"
             className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-white/85 ring-1 ring-white/10 backdrop-blur transition-colors hover:bg-white/10 hover:text-white md:hidden"
@@ -151,113 +142,6 @@ export function Navbar() {
         </nav>
       )}
     </header>
-  );
-}
-
-function BackendSettings({
-  open,
-  setOpen,
-}: {
-  open: boolean;
-  setOpen: (v: boolean) => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [baseUrl, setUrl] = useState(getBaseUrl());
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<
-    { kind: "ok" | "err"; message: string } | null
-  >(null);
-  const reset = useAnalysisStore((s) => s.reset);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open, setOpen]);
-
-  const saveAndTest = async () => {
-    setBaseUrl(baseUrl);
-    setStatus(null);
-    setLoading(true);
-    try {
-      const h = await checkHealth();
-      setStatus({
-        kind: "ok",
-        message: h.message ?? "Backend operationnel.",
-      });
-    } catch (e) {
-      setStatus({ kind: "err", message: (e as Error).message });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        className={cn(
-          "inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-white/80 ring-1 ring-white/10 backdrop-blur transition-colors hover:bg-white/10 hover:text-white",
-          open && "bg-white/10 text-white",
-        )}
-        onClick={() => setOpen(!open)}
-      >
-        <Settings className="h-4 w-4" />
-        <span className="hidden sm:inline">Backend</span>
-      </button>
-
-      {open && (
-        <div className="absolute right-0 mt-2 w-80 rounded-lg border border-slate-200 bg-white p-4 shadow-xl text-ccm-ink">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ccm-red">
-            Configuration backend
-          </p>
-          <label className="mt-3 block text-xs font-medium text-slate-600">
-            URL FastAPI
-          </label>
-          <Input
-            value={baseUrl}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="http://127.0.0.1:8000"
-            className="mt-1"
-          />
-          <Button
-            variant="outline"
-            className="mt-3 w-full"
-            onClick={saveAndTest}
-            disabled={loading}
-          >
-            <PlugZap className="h-4 w-4" />
-            {loading ? "Test en cours..." : "Tester la connexion"}
-          </Button>
-          {status && (
-            <p
-              className={cn(
-                "mt-2 flex items-start gap-1 text-xs",
-                status.kind === "ok" ? "text-emerald-700" : "text-red-700"
-              )}
-            >
-              <Check className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-              {status.message}
-            </p>
-          )}
-          <hr className="my-3 border-slate-200" />
-          <Button
-            variant="ghost"
-            className="w-full justify-start text-slate-600"
-            onClick={() => {
-              reset();
-              setOpen(false);
-            }}
-          >
-            <Trash2 className="h-4 w-4" />
-            Effacer la session
-          </Button>
-        </div>
-      )}
-    </div>
   );
 }
 

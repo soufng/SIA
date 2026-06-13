@@ -3,12 +3,14 @@ import autoTable from "jspdf-autotable";
 import type { Analysis } from "./types";
 
 // ---------------------------------------------------------------------------
-// Brand tokens — kept close to the app's Tailwind palette so the report
-// feels like an extension of the UI rather than a separate artifact.
+// Brand tokens — Tailwind-aligned palette so the PDF feels like an extension
+// of the web UI rather than a separate artifact.
 // ---------------------------------------------------------------------------
 
 const COLORS = {
   ccmRed: [193, 39, 45] as [number, number, number],
+  ccmRedDark: [142, 27, 34] as [number, number, number],
+  ccmGold: [212, 175, 55] as [number, number, number],
   ink: [17, 24, 39] as [number, number, number],
   slate900: [15, 23, 42] as [number, number, number],
   slate700: [51, 65, 85] as [number, number, number],
@@ -28,11 +30,11 @@ const COLORS = {
 };
 
 const PAGE = {
-  width: 595.28, // A4 width in pt
+  width: 595.28, // A4 in points
   height: 841.89,
-  marginX: 40,
-  marginTop: 80, // leave room for the header band
-  marginBottom: 60,
+  marginX: 48,
+  marginTop: 80, // header band space
+  marginBottom: 56,
 };
 
 // ---------------------------------------------------------------------------
@@ -112,7 +114,6 @@ function formatDateFr(value: unknown): string {
   });
 }
 
-// Load the CCM logo from /public and return a data URL ready for jsPDF.
 async function loadLogoDataUrl(path: string): Promise<string | null> {
   try {
     const response = await fetch(path, { cache: "force-cache" });
@@ -130,7 +131,7 @@ async function loadLogoDataUrl(path: string): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
-// Layout primitives drawn natively in jsPDF
+// Drawing context + primitives
 // ---------------------------------------------------------------------------
 
 interface Ctx {
@@ -139,6 +140,7 @@ interface Ctx {
   logo: string | null;
   pageNumber: number;
   scenarioName: string;
+  sectionLabel: string;
 }
 
 function newPage(ctx: Ctx, options: { withHeader?: boolean } = {}): void {
@@ -161,48 +163,55 @@ function drawHeader(ctx: Ctx): void {
   doc.setFillColor(...COLORS.ccmRed);
   doc.rect(0, 0, PAGE.width, 4, "F");
 
-  // Logo + lockup text
+  // Brand lockup
   if (ctx.logo) {
     try {
-      doc.addImage(ctx.logo, "PNG", PAGE.marginX, 18, 32, 32);
+      doc.addImage(ctx.logo, "PNG", PAGE.marginX, 22, 28, 28);
     } catch {
-      /* swallow — logo unavailable, header still works */
+      /* logo unavailable */
     }
   }
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
+  doc.setFontSize(10);
   doc.setTextColor(...COLORS.ink);
-  doc.text("SIA / CCM", PAGE.marginX + 42, 32);
+  doc.text("SIA · CCM", PAGE.marginX + 36, 34);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.setTextColor(...COLORS.slate500);
-  doc.text(
-    "Centre Cinématographique Marocain",
-    PAGE.marginX + 42,
-    44
-  );
+  doc.text("Rapport d'analyse de scénario", PAGE.marginX + 36, 45);
 
-  // Right-aligned scenario name
+  // Right-aligned current section label
+  if (ctx.sectionLabel) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(...COLORS.ccmRed);
+    doc.text(
+      ctx.sectionLabel.toUpperCase(),
+      PAGE.width - PAGE.marginX,
+      34,
+      { align: "right" }
+    );
+  }
   if (ctx.scenarioName) {
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
+    doc.setFontSize(8);
     doc.setTextColor(...COLORS.slate500);
     const truncated =
-      ctx.scenarioName.length > 60
-        ? `${ctx.scenarioName.slice(0, 57)}…`
+      ctx.scenarioName.length > 56
+        ? `${ctx.scenarioName.slice(0, 53)}…`
         : ctx.scenarioName;
-    doc.text(truncated, PAGE.width - PAGE.marginX, 36, { align: "right" });
+    doc.text(truncated, PAGE.width - PAGE.marginX, 45, { align: "right" });
   }
 
   // Bottom rule
   doc.setDrawColor(...COLORS.slate200);
   doc.setLineWidth(0.5);
-  doc.line(PAGE.marginX, 60, PAGE.width - PAGE.marginX, 60);
+  doc.line(PAGE.marginX, 64, PAGE.width - PAGE.marginX, 64);
 }
 
 function drawFooter(ctx: Ctx): void {
   const { doc, pageNumber } = ctx;
-  const y = PAGE.height - 30;
+  const y = PAGE.height - 32;
   doc.setDrawColor(...COLORS.slate200);
   doc.setLineWidth(0.5);
   doc.line(PAGE.marginX, y - 12, PAGE.width - PAGE.marginX, y - 12);
@@ -210,7 +219,7 @@ function drawFooter(ctx: Ctx): void {
   doc.setFontSize(8);
   doc.setTextColor(...COLORS.slate400);
   doc.text(
-    "SIA · Plateforme d'analyse de scénarios · Centre Cinématographique Marocain",
+    "SIA — Plateforme d'analyse de scénarios · Centre Cinématographique Marocain",
     PAGE.marginX,
     y
   );
@@ -219,31 +228,47 @@ function drawFooter(ctx: Ctx): void {
   });
 }
 
-function sectionTitle(ctx: Ctx, title: string): void {
-  ensureSpace(ctx, 32);
+function sectionHeader(
+  ctx: Ctx,
+  _number: string,
+  title: string,
+  _subtitle?: string
+): void {
+  ensureSpace(ctx, 28);
   const { doc } = ctx;
-  // Coloured accent square
-  doc.setFillColor(...COLORS.ccmRed);
-  doc.rect(PAGE.marginX, ctx.cursorY - 9, 3, 13, "F");
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
+  doc.setFontSize(16);
   doc.setTextColor(...COLORS.ink);
-  doc.text(title, PAGE.marginX + 10, ctx.cursorY);
-  ctx.cursorY += 16;
+  doc.text(title, PAGE.marginX, ctx.cursorY);
+  ctx.cursorY += 5;
+  doc.setDrawColor(...COLORS.ccmRed);
+  doc.setLineWidth(2);
+  doc.line(PAGE.marginX, ctx.cursorY, PAGE.marginX + 28, ctx.cursorY);
+  ctx.cursorY += 10;
+}
+
+function subTitle(ctx: Ctx, text: string): void {
+  ensureSpace(ctx, 18);
+  const { doc } = ctx;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10.5);
+  doc.setTextColor(...COLORS.slate900);
+  doc.text(text, PAGE.marginX, ctx.cursorY);
+  ctx.cursorY += 11;
 }
 
 function paragraph(ctx: Ctx, text: string, opts: { italic?: boolean } = {}): void {
   const { doc } = ctx;
   doc.setFont("helvetica", opts.italic ? "italic" : "normal");
-  doc.setFontSize(10);
+  doc.setFontSize(9.5);
   doc.setTextColor(...COLORS.slate700);
   const lines = doc.splitTextToSize(text, PAGE.width - PAGE.marginX * 2);
   for (const line of lines) {
-    ensureSpace(ctx, 14);
+    ensureSpace(ctx, 12);
     doc.text(line, PAGE.marginX, ctx.cursorY);
-    ctx.cursorY += 13;
+    ctx.cursorY += 12;
   }
-  ctx.cursorY += 4;
+  ctx.cursorY += 3;
 }
 
 function riskBadge(
@@ -258,7 +283,7 @@ function riskBadge(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8);
   const textWidth = doc.getTextWidth(label);
-  const width = textWidth + 14;
+  const width = textWidth + 16;
   const height = 16;
   doc.setFillColor(...colors.bg);
   doc.roundedRect(x, y, width, height, 8, 8, "F");
@@ -278,10 +303,8 @@ function scoreBar(
   const { doc } = ctx;
   const clamped = Math.max(0, Math.min(100, pct));
   const color = riskColor(riskFromScore(clamped)).bar;
-  // Track
   doc.setFillColor(...COLORS.slate100);
   doc.roundedRect(x, y, width, height, height / 2, height / 2, "F");
-  // Fill
   if (clamped > 0) {
     doc.setFillColor(...color);
     doc.roundedRect(
@@ -308,132 +331,173 @@ function metricCard(
   }
 ): number {
   const { doc } = ctx;
-  const height = 52;
-  // Card background
+  const height = 48;
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(...COLORS.slate200);
   doc.setLineWidth(0.5);
-  doc.roundedRect(opts.x, opts.y, opts.width, height, 4, 4, "FD");
-  // Left accent stripe
+  doc.roundedRect(opts.x, opts.y, opts.width, height, 6, 6, "FD");
   doc.setFillColor(...opts.accent);
   doc.rect(opts.x, opts.y, 3, height, "F");
-  // Label
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.setTextColor(...COLORS.slate500);
-  doc.text(opts.label.toUpperCase(), opts.x + 12, opts.y + 16);
-  // Value
+  doc.text(opts.label.toUpperCase(), opts.x + 10, opts.y + 16);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(20);
+  doc.setFontSize(17);
   doc.setTextColor(...COLORS.ink);
-  doc.text(opts.value, opts.x + 12, opts.y + 40);
+  doc.text(opts.value, opts.x + 10, opts.y + 38);
   return height;
 }
 
 // ---------------------------------------------------------------------------
-// Sections
+// Cover page
 // ---------------------------------------------------------------------------
 
 function drawCoverPage(ctx: Ctx, analysis: Analysis): void {
   const { doc } = ctx;
-  // Coloured top half
-  doc.setFillColor(...COLORS.ccmRed);
-  doc.rect(0, 0, PAGE.width, 280, "F");
 
-  // Logo centered
+  // Full-page gradient effect via two rects
+  doc.setFillColor(...COLORS.ccmRedDark);
+  doc.rect(0, 0, PAGE.width, PAGE.height, "F");
+  doc.setFillColor(...COLORS.ccmRed);
+  doc.rect(0, 0, PAGE.width, 380, "F");
+
+  // Gold accent line
+  doc.setFillColor(...COLORS.ccmGold);
+  doc.rect(0, 378, PAGE.width, 2, "F");
+
+  // Logo
   if (ctx.logo) {
     try {
-      doc.addImage(ctx.logo, "PNG", PAGE.width / 2 - 36, 60, 72, 72);
+      doc.addImage(ctx.logo, "PNG", PAGE.width / 2 - 36, 110, 72, 72);
     } catch {
       /* ignore */
     }
   }
 
-  // Title
+  // Brand
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(255, 255, 255);
-  doc.text("SIA / CCM", PAGE.width / 2, 160, { align: "center" });
+  doc.text("SIA  ·  CCM", PAGE.width / 2, 210, { align: "center" });
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
+  doc.setTextColor(255, 220, 180);
   doc.text(
     "CENTRE CINÉMATOGRAPHIQUE MAROCAIN",
     PAGE.width / 2,
-    176,
+    226,
     { align: "center" }
   );
 
+  // Main title
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(26);
-  doc.text("Rapport d'analyse", PAGE.width / 2, 222, { align: "center" });
+  doc.setFontSize(30);
+  doc.setTextColor(255, 255, 255);
+  doc.text("Rapport d'analyse", PAGE.width / 2, 290, { align: "center" });
   doc.setFont("helvetica", "normal");
   doc.setFontSize(14);
-  doc.text("de scénario", PAGE.width / 2, 244, { align: "center" });
+  doc.setTextColor(255, 220, 180);
+  doc.text("de scénario", PAGE.width / 2, 314, { align: "center" });
 
-  // White area with metadata + risk highlight
+  // Centered metadata card on the dark half
   const docStats = (analysis.document_stats ?? {}) as Record<string, unknown>;
-  const filename =
-    String(
-      pick(docStats, "original_filename", "file_name") ??
-        analysis.scenario_id ??
-        "Scénario sans nom"
-    );
+  const filename = String(
+    pick(docStats, "original_filename", "file_name") ??
+      analysis.scenario_id ??
+      "Scénario sans nom"
+  );
 
-  // Filename card
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(...COLORS.slate500);
-  doc.text("DOCUMENT ANALYSÉ", PAGE.width / 2, 320, { align: "center" });
+  const cardX = 60;
+  const cardY = 440;
+  const cardW = PAGE.width - 120;
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(cardX, cardY, cardW, 260, 10, 10, "F");
+
+  // Document label
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(...COLORS.ccmRed);
+  doc.text("DOCUMENT ANALYSÉ", PAGE.width / 2, cardY + 28, { align: "center" });
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
+  doc.setFontSize(15);
   doc.setTextColor(...COLORS.ink);
-  const filenameLines = doc.splitTextToSize(filename, PAGE.width - 120);
-  let y = 340;
+  const filenameLines = doc.splitTextToSize(filename, cardW - 40);
+  let y = cardY + 50;
   for (const line of filenameLines.slice(0, 2)) {
     doc.text(line, PAGE.width / 2, y, { align: "center" });
     y += 20;
   }
 
-  // Headline risk badge
+  // Divider
+  doc.setDrawColor(...COLORS.slate200);
+  doc.setLineWidth(0.5);
+  doc.line(cardX + 32, y + 14, cardX + cardW - 32, y + 14);
+  y += 38;
+
+  // Risk badge — simple, centred
   const rag = analysis.rag_report ?? {};
   const risk = String(rag.risk_level ?? "unknown");
   const colors = riskColor(risk);
   const label = formatRiskFr(risk);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  const labelWidth = doc.getTextWidth(label) + 60;
-  const badgeX = (PAGE.width - labelWidth) / 2;
-  doc.setFillColor(...colors.bg);
-  doc.roundedRect(badgeX, y + 30, labelWidth, 38, 19, 19, "F");
-  doc.setTextColor(...colors.fg);
-  doc.text("RISQUE  ·  ", badgeX + 24, y + 54);
-  const prefixWidth = doc.getTextWidth("RISQUE  ·  ");
-  doc.text(label, badgeX + 24 + prefixWidth, y + 54);
 
-  // Date + scenario id at the bottom
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(...COLORS.slate500);
+  doc.text("NIVEAU DE RISQUE", PAGE.width / 2, y, { align: "center" });
+  y += 18;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  const badgeTextW = doc.getTextWidth(label);
+  const badgeW = badgeTextW + 56;
+  const badgeH = 36;
+  const badgeX = (PAGE.width - badgeW) / 2;
+  doc.setFillColor(...colors.bg);
+  doc.roundedRect(badgeX, y, badgeW, badgeH, 18, 18, "F");
+  doc.setTextColor(...colors.fg);
+  doc.text(label, PAGE.width / 2, y + 23, { align: "center" });
+  y += badgeH + 30;
+
+  // Date + id
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(...COLORS.slate500);
   doc.text(
     `Analyse effectuée le ${formatDateFr(analysis.analysis_timestamp)}`,
     PAGE.width / 2,
-    PAGE.height - 90,
+    y,
     { align: "center" }
   );
   if (analysis.scenario_id) {
     doc.text(
-      `Identifiant scénario : ${analysis.scenario_id}`,
+      `Identifiant : ${analysis.scenario_id}`,
       PAGE.width / 2,
-      PAGE.height - 76,
+      y + 14,
       { align: "center" }
     );
   }
 
-  // Bottom accent
-  doc.setFillColor(...COLORS.ccmRed);
-  doc.rect(0, PAGE.height - 8, PAGE.width, 8, "F");
+  // Footer brand line
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(255, 220, 180);
+  doc.text(
+    "Document confidentiel — usage interne CCM",
+    PAGE.width / 2,
+    PAGE.height - 40,
+    { align: "center" }
+  );
 }
+
+// ---------------------------------------------------------------------------
+// Table of contents
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Section: Synthèse
+// ---------------------------------------------------------------------------
 
 function drawSummary(ctx: Ctx, analysis: Analysis): void {
   const docStats = (analysis.document_stats ?? {}) as Record<string, unknown>;
@@ -442,14 +506,47 @@ function drawSummary(ctx: Ctx, analysis: Analysis): void {
   const adult = (analysis.adult_content ?? {}) as Record<string, unknown>;
   const rag = (analysis.rag_report ?? {}) as Record<string, unknown>;
 
-  sectionTitle(ctx, "Synthèse");
+  sectionHeader(
+    ctx,
+    "01",
+    "Synthèse exécutive",
+    "Vue d'ensemble du niveau de risque et des indicateurs clés du document."
+  );
+
+  // Risk banner
+  const risk = String(rag.risk_level ?? "unknown");
+  const colors = riskColor(risk);
+  const { doc } = ctx;
+  ensureSpace(ctx, 44);
+  doc.setFillColor(...colors.bg);
+  doc.roundedRect(
+    PAGE.marginX,
+    ctx.cursorY,
+    PAGE.width - PAGE.marginX * 2,
+    38,
+    6,
+    6,
+    "F"
+  );
+  doc.setFillColor(...colors.bar);
+  doc.rect(PAGE.marginX, ctx.cursorY, 4, 38, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(...colors.fg);
+  doc.text("NIVEAU DE RISQUE GLOBAL", PAGE.marginX + 12, ctx.cursorY + 14);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text(formatRiskFr(risk), PAGE.marginX + 12, ctx.cursorY + 30);
+  ctx.cursorY += 46;
+
+  // Synthesis text (use conclusion as the headline narrative)
   const conclusion = String(
     rag.conclusion ?? rag.summary ?? "Aucune synthèse disponible."
   );
   paragraph(ctx, conclusion);
 
-  ctx.cursorY += 6;
-
+  // Metric cards
+  subTitle(ctx, "Indicateurs clés");
   const simPct = toPercent(
     pick(plagiarism, "global_similarity_score", "score") ?? 0
   );
@@ -457,10 +554,10 @@ function drawSummary(ctx: Ctx, analysis: Analysis): void {
   const adultPct = toPercent(pick(adult, "adult_content_score") ?? 0);
   const words = toNumber(pick(docStats, "words_count", "word_count"));
 
-  const cardW = (PAGE.width - PAGE.marginX * 2 - 12 * 3) / 4;
+  const cardW = (PAGE.width - PAGE.marginX * 2 - 10 * 3) / 4;
   const startX = PAGE.marginX;
+  ensureSpace(ctx, 56);
   const y = ctx.cursorY;
-  ensureSpace(ctx, 64);
   metricCard(ctx, {
     x: startX,
     y,
@@ -470,7 +567,7 @@ function drawSummary(ctx: Ctx, analysis: Analysis): void {
     accent: riskColor(riskFromScore(simPct)).bar,
   });
   metricCard(ctx, {
-    x: startX + cardW + 12,
+    x: startX + cardW + 10,
     y,
     width: cardW,
     label: "Vulgarité",
@@ -478,7 +575,7 @@ function drawSummary(ctx: Ctx, analysis: Analysis): void {
     accent: riskColor(riskFromScore(profPct)).bar,
   });
   metricCard(ctx, {
-    x: startX + (cardW + 12) * 2,
+    x: startX + (cardW + 10) * 2,
     y,
     width: cardW,
     label: "Contenu adulte",
@@ -486,18 +583,74 @@ function drawSummary(ctx: Ctx, analysis: Analysis): void {
     accent: riskColor(riskFromScore(adultPct)).bar,
   });
   metricCard(ctx, {
-    x: startX + (cardW + 12) * 3,
+    x: startX + (cardW + 10) * 3,
     y,
     width: cardW,
-    label: "Mots",
+    label: "Mots analysés",
     value: words.toLocaleString("fr-FR"),
     accent: COLORS.slate400,
   });
-  ctx.cursorY += 64;
+  ctx.cursorY += 56;
+
+  // Document metadata table
+  subTitle(ctx, "Document analysé");
+  const meta: Array<[string, string]> = [
+    [
+      "Nom du fichier",
+      String(pick(docStats, "original_filename", "file_name") ?? "—"),
+    ],
+    ["Identifiant scénario", String(analysis.scenario_id ?? "—")],
+    [
+      "Date d'analyse",
+      formatDateFr(analysis.analysis_timestamp),
+    ],
+    [
+      "Nombre de mots",
+      words ? words.toLocaleString("fr-FR") : "—",
+    ],
+    [
+      "Nombre de chunks",
+      String(
+        pick(docStats, "chunks_count", "chunk_count") ?? "—"
+      ),
+    ],
+  ];
+  autoTable(doc, {
+    startY: ctx.cursorY,
+    head: [],
+    body: meta,
+    theme: "plain",
+    styles: { fontSize: 9.5, cellPadding: 6, textColor: COLORS.slate700 },
+    columnStyles: {
+      0: { fillColor: COLORS.slate50, cellWidth: 170, fontStyle: "bold" },
+      1: { cellWidth: "auto" },
+    },
+    margin: { left: PAGE.marginX, right: PAGE.marginX },
+    didDrawCell: (data) => {
+      if (data.section === "body") {
+        doc.setDrawColor(...COLORS.slate200);
+        doc.setLineWidth(0.3);
+        doc.line(
+          data.cell.x,
+          data.cell.y + data.cell.height,
+          data.cell.x + data.cell.width,
+          data.cell.y + data.cell.height
+        );
+      }
+    },
+  });
+  ctx.cursorY = ((doc as unknown as {
+    lastAutoTable: { finalY: number };
+  }).lastAutoTable.finalY ?? ctx.cursorY) + 16;
 }
+
+// ---------------------------------------------------------------------------
+// Section: Plagiat
+// ---------------------------------------------------------------------------
 
 function drawPlagiarism(ctx: Ctx, analysis: Analysis): void {
   const plagiarism = (analysis.plagiarism ?? {}) as Record<string, unknown>;
+  const rag = (analysis.rag_report ?? {}) as Record<string, unknown>;
   const { doc } = ctx;
   const matches = Array.isArray(plagiarism.matches)
     ? (plagiarism.matches as Array<Record<string, unknown>>)
@@ -506,21 +659,26 @@ function drawPlagiarism(ctx: Ctx, analysis: Analysis): void {
     pick(plagiarism, "global_similarity_score", "score") ?? 0
   );
 
-  sectionTitle(ctx, "Détection de plagiat");
+  sectionHeader(
+    ctx,
+    "02",
+    "Détection de plagiat",
+    "Comparaison sémantique du document avec le corpus indexé."
+  );
 
-  // Headline row with score bar + badge
-  ensureSpace(ctx, 32);
+  // Headline score
+  ensureSpace(ctx, 60);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(...COLORS.slate500);
-  doc.text("Similarité globale", PAGE.marginX, ctx.cursorY);
+  doc.text("SIMILARITÉ GLOBALE", PAGE.marginX, ctx.cursorY);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
+  doc.setFontSize(28);
   doc.setTextColor(...COLORS.ink);
-  doc.text(`${simPct}%`, PAGE.width - PAGE.marginX, ctx.cursorY, {
+  doc.text(`${simPct}%`, PAGE.width - PAGE.marginX, ctx.cursorY + 4, {
     align: "right",
   });
-  ctx.cursorY += 8;
+  ctx.cursorY += 14;
   scoreBar(
     ctx,
     simPct,
@@ -529,8 +687,9 @@ function drawPlagiarism(ctx: Ctx, analysis: Analysis): void {
     PAGE.width - PAGE.marginX * 2,
     8
   );
-  ctx.cursorY += 22;
+  ctx.cursorY += 26;
 
+  // Stat row
   const exactDup = Boolean(plagiarism.exact_duplicate || plagiarism.duplicate);
   const totalMatches = toNumber(plagiarism.total_matches ?? matches.length);
   const sources = Array.isArray(plagiarism.plagiarism_sources ?? plagiarism.sources)
@@ -548,20 +707,27 @@ function drawPlagiarism(ctx: Ctx, analysis: Analysis): void {
       ["Sources distinctes", String(sources.length)],
     ],
     theme: "grid",
-    styles: { fontSize: 9, cellPadding: 6, textColor: COLORS.slate700 },
+    styles: { fontSize: 9.5, cellPadding: 7, textColor: COLORS.slate700 },
     columnStyles: {
-      0: { fillColor: COLORS.slate50, cellWidth: 160, fontStyle: "bold" },
+      0: { fillColor: COLORS.slate50, cellWidth: 180, fontStyle: "bold" },
       1: { cellWidth: "auto" },
     },
     margin: { left: PAGE.marginX, right: PAGE.marginX },
   });
   ctx.cursorY = ((doc as unknown as {
     lastAutoTable: { finalY: number };
-  }).lastAutoTable.finalY ?? ctx.cursorY) + 16;
+  }).lastAutoTable.finalY ?? ctx.cursorY) + 18;
 
-  // Per-source breakdown
+  // Narrative explanation
+  const explanation = String(rag.plagiarism_explanation ?? "").trim();
+  if (explanation) {
+    subTitle(ctx, "Analyse");
+    paragraph(ctx, explanation);
+  }
+
+  // Sources breakdown
   if (sources.length > 0) {
-    sectionTitle(ctx, "Sources de plagiat");
+    subTitle(ctx, "Sources identifiées");
     sources.slice(0, 5).forEach((source, idx) => {
       ensureSpace(ctx, 70);
       const name = String(
@@ -586,66 +752,71 @@ function drawPlagiarism(ctx: Ctx, analysis: Analysis): void {
         PAGE.marginX,
         cardY,
         PAGE.width - PAGE.marginX * 2,
-        56,
-        4,
-        4,
+        58,
+        6,
+        6,
         "FD"
       );
-      // Risk-coloured side accent
       doc.setFillColor(...riskColor(sourceRisk).bar);
-      doc.rect(PAGE.marginX, cardY, 3, 56, "F");
+      doc.rect(PAGE.marginX, cardY, 3, 58, "F");
 
-      // Filename
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
       doc.setTextColor(...COLORS.ink);
       const truncatedName =
-        name.length > 75 ? `${name.slice(0, 72)}…` : name;
-      doc.text(truncatedName, PAGE.marginX + 12, cardY + 18);
+        name.length > 70 ? `${name.slice(0, 67)}…` : name;
+      doc.text(truncatedName, PAGE.marginX + 14, cardY + 18);
 
-      // Subtitle
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
       doc.setTextColor(...COLORS.slate500);
       doc.text(
         `${matchesCount} passage${matchesCount > 1 ? "s" : ""} similaire${matchesCount > 1 ? "s" : ""}`,
-        PAGE.marginX + 12,
+        PAGE.marginX + 14,
         cardY + 32
       );
 
-      // Score + bar
-      const barX = PAGE.marginX + 12;
-      const barW = PAGE.width - PAGE.marginX * 2 - 24 - 90;
-      scoreBar(ctx, best, barX, cardY + 42, barW, 5);
+      const barX = PAGE.marginX + 14;
+      const barW = PAGE.width - PAGE.marginX * 2 - 28 - 90;
+      scoreBar(ctx, best, barX, cardY + 44, barW, 5);
 
-      // Score and badge on the right
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(13);
+      doc.setFontSize(14);
       doc.setTextColor(...COLORS.ink);
       doc.text(
         `${best}%`,
-        PAGE.width - PAGE.marginX - 12,
-        cardY + 22,
+        PAGE.width - PAGE.marginX - 14,
+        cardY + 24,
         { align: "right" }
       );
       riskBadge(
         ctx,
         sourceRisk,
         PAGE.width - PAGE.marginX - 80,
-        cardY + 34
+        cardY + 36
       );
 
-      ctx.cursorY += 64;
+      ctx.cursorY += 68;
     });
   }
 }
 
+// ---------------------------------------------------------------------------
+// Section: Modération
+// ---------------------------------------------------------------------------
+
 function drawModeration(ctx: Ctx, analysis: Analysis): void {
   const profanity = (analysis.profanity ?? {}) as Record<string, unknown>;
   const adult = (analysis.adult_content ?? {}) as Record<string, unknown>;
+  const rag = (analysis.rag_report ?? {}) as Record<string, unknown>;
   const { doc } = ctx;
 
-  sectionTitle(ctx, "Modération de contenu");
+  sectionHeader(
+    ctx,
+    "03",
+    "Modération de contenu",
+    "Détection de vulgarité et de contenu adulte dans le scénario."
+  );
 
   const profWords = Array.isArray(profanity.detected_words)
     ? (profanity.detected_words as string[])
@@ -656,9 +827,9 @@ function drawModeration(ctx: Ctx, analysis: Analysis): void {
   const profPct = toPercent(pick(profanity, "profanity_score") ?? 0);
   const adultPct = toPercent(pick(adult, "adult_content_score") ?? 0);
 
-  // Two side-by-side moderation cards
-  ensureSpace(ctx, 130);
+  ensureSpace(ctx, 102);
   const cardW = (PAGE.width - PAGE.marginX * 2 - 12) / 2;
+  const cardH = 94;
 
   const drawModCard = (
     title: string,
@@ -671,21 +842,21 @@ function drawModeration(ctx: Ctx, analysis: Analysis): void {
     doc.setFillColor(255, 255, 255);
     doc.setDrawColor(...COLORS.slate200);
     doc.setLineWidth(0.5);
-    doc.roundedRect(x, cardY, cardW, 120, 4, 4, "FD");
+    doc.roundedRect(x, cardY, cardW, cardH, 6, 6, "FD");
     doc.setFillColor(...color);
-    doc.rect(x, cardY, 3, 120, "F");
+    doc.rect(x, cardY, 3, cardH, "F");
 
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(...COLORS.ink);
-    doc.text(title.toUpperCase(), x + 12, cardY + 18);
+    doc.setFontSize(8.5);
+    doc.setTextColor(...COLORS.ccmRed);
+    doc.text(title.toUpperCase(), x + 12, cardY + 16);
 
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(26);
+    doc.setFontSize(22);
     doc.setTextColor(...COLORS.ink);
-    doc.text(`${pct}%`, x + 12, cardY + 50);
+    doc.text(`${pct}%`, x + 12, cardY + 42);
 
-    scoreBar(ctx, pct, x + 12, cardY + 58, cardW - 24, 5);
+    scoreBar(ctx, pct, x + 12, cardY + 50, cardW - 24, 5);
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
@@ -695,14 +866,15 @@ function drawModeration(ctx: Ctx, analysis: Analysis): void {
         ? "Aucun terme détecté."
         : `${detected.length} terme${detected.length > 1 ? "s" : ""} détecté${detected.length > 1 ? "s" : ""}`,
       x + 12,
-      cardY + 78
+      cardY + 66
     );
 
     if (detected.length > 0) {
-      const preview = detected.slice(0, 4).join(", ");
+      const preview = detected.slice(0, 5).join(", ");
       const lines = doc.splitTextToSize(preview, cardW - 24);
       doc.setTextColor(...COLORS.slate700);
-      doc.text(lines.slice(0, 2), x + 12, cardY + 92);
+      doc.setFontSize(8.5);
+      doc.text(lines.slice(0, 1), x + 12, cardY + 80);
     }
   };
 
@@ -713,39 +885,80 @@ function drawModeration(ctx: Ctx, analysis: Analysis): void {
     adultTerms,
     PAGE.marginX + cardW + 12
   );
-  ctx.cursorY += 132;
+  ctx.cursorY += cardH + 10;
+
+  // Narrative
+  const moderation = String(rag.moderation_explanation ?? "").trim();
+  if (moderation) {
+    subTitle(ctx, "Analyse détaillée");
+    paragraph(ctx, moderation);
+  }
 }
 
-function drawMoroccanConstants(ctx: Ctx, analysis: Analysis): void {
+// ---------------------------------------------------------------------------
+// Section: Constantes nationales
+// ---------------------------------------------------------------------------
+
+function drawMoroccanConstants(ctx: Ctx, analysis: Analysis): boolean {
   const mc = (
     (analysis as unknown as Record<string, unknown>).moroccan_constants ??
     {}
   ) as Record<string, unknown>;
-  if (!mc || Object.keys(mc).length === 0) return;
+  if (!mc || Object.keys(mc).length === 0) return false;
 
   const riskLevel = String(mc.risk_level ?? "low");
   const findings = Array.isArray(mc.findings)
     ? (mc.findings as Array<Record<string, unknown>>)
     : [];
 
-  sectionTitle(ctx, "Constantes nationales du Maroc");
+  sectionHeader(
+    ctx,
+    "04",
+    "Constantes nationales",
+    "Conformité aux références culturelles et institutionnelles du Maroc."
+  );
 
-  ensureSpace(ctx, 32);
+  // Compliance banner
+  const colors = riskColor(riskLevel);
   const { doc } = ctx;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(...COLORS.slate500);
-  doc.text("Niveau de conformité", PAGE.marginX, ctx.cursorY);
-  riskBadge(ctx, riskLevel, PAGE.marginX + 130, ctx.cursorY - 12);
-  ctx.cursorY += 16;
+  ensureSpace(ctx, 50);
+  doc.setFillColor(...colors.bg);
+  doc.roundedRect(
+    PAGE.marginX,
+    ctx.cursorY,
+    PAGE.width - PAGE.marginX * 2,
+    44,
+    6,
+    6,
+    "F"
+  );
+  doc.setFillColor(...colors.bar);
+  doc.rect(PAGE.marginX, ctx.cursorY, 4, 44, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(...colors.fg);
+  doc.text(
+    "NIVEAU DE CONFORMITÉ",
+    PAGE.marginX + 14,
+    ctx.cursorY + 17
+  );
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text(
+    formatRiskFr(riskLevel),
+    PAGE.marginX + 14,
+    ctx.cursorY + 35
+  );
+  ctx.cursorY += 58;
 
   if (findings.length === 0) {
     paragraph(ctx, "Aucun signal de non-conformité détecté.", { italic: true });
-    return;
+    return true;
   }
 
+  subTitle(ctx, "Points relevés");
   findings.slice(0, 10).forEach((finding, i) => {
-    ensureSpace(ctx, 40);
+    ensureSpace(ctx, 46);
     const label = String(
       finding.label ?? finding.title ?? `Constante ${i + 1}`
     );
@@ -764,47 +977,112 @@ function drawMoroccanConstants(ctx: Ctx, analysis: Analysis): void {
       PAGE.width - PAGE.marginX - 80,
       ctx.cursorY - 11
     );
-    ctx.cursorY += 14;
+    ctx.cursorY += 16;
     if (detail) paragraph(ctx, detail);
   });
+  return true;
 }
 
-function drawNarrative(ctx: Ctx, analysis: Analysis): void {
+// ---------------------------------------------------------------------------
+// Section: Recommandations
+// ---------------------------------------------------------------------------
+
+function drawRecommendations(ctx: Ctx, analysis: Analysis, number: string): void {
   const rag = (analysis.rag_report ?? {}) as Record<string, unknown>;
-  if (!rag) return;
-
-  sectionTitle(ctx, "Rapport d'analyse détaillé");
-
-  const sections: Array<[string, unknown]> = [
-    ["Synthèse", rag.summary],
-    ["Explication du plagiat", rag.plagiarism_explanation],
-    ["Explication de la modération", rag.moderation_explanation],
-    ["Conclusion", rag.conclusion],
-  ];
-  for (const [title, text] of sections) {
-    const content = String(text ?? "").trim();
-    if (!content) continue;
-    ensureSpace(ctx, 24);
-    ctx.doc.setFont("helvetica", "bold");
-    ctx.doc.setFontSize(10);
-    ctx.doc.setTextColor(...COLORS.ink);
-    ctx.doc.text(title, PAGE.marginX, ctx.cursorY);
-    ctx.cursorY += 14;
-    paragraph(ctx, content);
-  }
-
   const recs = Array.isArray(rag.recommendations)
     ? (rag.recommendations as string[])
     : [];
-  if (recs.length > 0) {
-    ensureSpace(ctx, 20);
-    ctx.doc.setFont("helvetica", "bold");
-    ctx.doc.setFontSize(10);
-    ctx.doc.setTextColor(...COLORS.ink);
-    ctx.doc.text("Recommandations", PAGE.marginX, ctx.cursorY);
-    ctx.cursorY += 14;
-    recs.forEach((rec) => paragraph(ctx, `• ${rec}`));
-  }
+  if (recs.length === 0) return;
+
+  sectionHeader(
+    ctx,
+    number,
+    "Recommandations",
+    "Actions suggérées pour finaliser la validation du scénario."
+  );
+
+  const { doc } = ctx;
+  recs.forEach((rec, idx) => {
+    ensureSpace(ctx, 42);
+    const cardY = ctx.cursorY;
+    const cardH = 36;
+
+    doc.setFillColor(...COLORS.slate50);
+    doc.roundedRect(
+      PAGE.marginX,
+      cardY,
+      PAGE.width - PAGE.marginX * 2,
+      cardH,
+      6,
+      6,
+      "F"
+    );
+    // Number badge
+    doc.setFillColor(...COLORS.ccmRed);
+    doc.circle(PAGE.marginX + 18, cardY + cardH / 2, 11, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(255, 255, 255);
+    doc.text(
+      String(idx + 1),
+      PAGE.marginX + 18,
+      cardY + cardH / 2 + 4,
+      { align: "center" }
+    );
+
+    // Recommendation text
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.setTextColor(...COLORS.slate700);
+    const textX = PAGE.marginX + 38;
+    const textW = PAGE.width - PAGE.marginX * 2 - 50;
+    const lines = doc.splitTextToSize(rec, textW);
+    const limited = lines.slice(0, 2);
+    const verticalOffset =
+      limited.length === 1 ? cardH / 2 + 3 : cardH / 2 - 3;
+    limited.forEach((line: string, lineIdx: number) => {
+      doc.text(line, textX, cardY + verticalOffset + lineIdx * 12);
+    });
+
+    // Expand card if text wraps to 2 lines
+    const realH = Math.max(cardH, limited.length * 14 + 18);
+    if (realH > cardH) {
+      // Re-draw with proper height
+      doc.setFillColor(...COLORS.slate50);
+      doc.roundedRect(
+        PAGE.marginX,
+        cardY,
+        PAGE.width - PAGE.marginX * 2,
+        realH,
+        6,
+        6,
+        "F"
+      );
+      doc.setFillColor(...COLORS.ccmRed);
+      doc.circle(PAGE.marginX + 18, cardY + realH / 2, 11, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(255, 255, 255);
+      doc.text(
+        String(idx + 1),
+        PAGE.marginX + 18,
+        cardY + realH / 2 + 4,
+        { align: "center" }
+      );
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9.5);
+      doc.setTextColor(...COLORS.slate700);
+      limited.forEach((line: string, lineIdx: number) => {
+        doc.text(
+          line,
+          textX,
+          cardY + 14 + lineIdx * 12 + (limited.length === 1 ? 6 : 0)
+        );
+      });
+    }
+
+    ctx.cursorY += realH + 10;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -820,11 +1098,31 @@ export async function generatePdfReport(analysis: Analysis): Promise<jsPDF> {
       analysis.scenario_id ??
       "Scénario"
   );
-  const ctx: Ctx = { doc, cursorY: PAGE.marginTop, logo, pageNumber: 1, scenarioName };
+  const ctx: Ctx = {
+    doc,
+    cursorY: PAGE.marginTop,
+    logo,
+    pageNumber: 1,
+    scenarioName,
+    sectionLabel: "",
+  };
 
+  // 1. Cover
   drawCoverPage(ctx, analysis);
 
-  // Body — first content page
+  const hasMoroccan =
+    !!(analysis as unknown as Record<string, unknown>).moroccan_constants &&
+    Object.keys(
+      ((analysis as unknown as Record<string, unknown>)
+        .moroccan_constants ?? {}) as Record<string, unknown>
+    ).length > 0;
+  const rag = (analysis.rag_report ?? {}) as Record<string, unknown>;
+  const recs = Array.isArray(rag.recommendations)
+    ? (rag.recommendations as string[])
+    : [];
+  const hasRecs = recs.length > 0;
+
+  // Start content on a fresh page after the cover; sections flow naturally.
   newPage(ctx);
 
   drawSummary(ctx, analysis);
@@ -832,10 +1130,14 @@ export async function generatePdfReport(analysis: Analysis): Promise<jsPDF> {
   drawPlagiarism(ctx, analysis);
   ctx.cursorY += 8;
   drawModeration(ctx, analysis);
-  ctx.cursorY += 8;
-  drawMoroccanConstants(ctx, analysis);
-  ctx.cursorY += 8;
-  drawNarrative(ctx, analysis);
+  if (hasMoroccan) {
+    ctx.cursorY += 8;
+    drawMoroccanConstants(ctx, analysis);
+  }
+  if (hasRecs) {
+    ctx.cursorY += 8;
+    drawRecommendations(ctx, analysis, hasMoroccan ? "05" : "04");
+  }
 
   return doc;
 }
