@@ -73,6 +73,8 @@ class VectorService:
         embeddings: list[list[float]],
         display_chunks: list[str] | None = None,
         chunk_metadata: list[dict[str, Any]] | None = None,
+        original_filename: str | None = None,
+        stored_filename: str | None = None,
     ) -> None:
         """Insert or update chunk embeddings in Qdrant.
 
@@ -125,6 +127,20 @@ class VectorService:
                     payload["chunk_text_display"] = display_chunks[index]
                 elif metadata.get("text_display"):
                     payload["chunk_text_display"] = metadata["text_display"]
+                # Source filename: lets the RAG fallback retrieval cite the
+                # original scenario by name instead of "non disponible".
+                # Per-chunk metadata wins over the upsert-level default so
+                # multi-source ingestion stays correct.
+                fname_original = (
+                    metadata.get("original_filename") or original_filename
+                )
+                fname_stored = (
+                    metadata.get("stored_filename") or stored_filename
+                )
+                if fname_original:
+                    payload["original_filename"] = str(fname_original)
+                if fname_stored:
+                    payload["stored_filename"] = str(fname_stored)
                 return payload
 
             points = [

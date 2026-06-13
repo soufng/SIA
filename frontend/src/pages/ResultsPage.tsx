@@ -117,6 +117,298 @@ function fallback(value: unknown): string {
   return s;
 }
 
+// Normalise les Arabic Presentation Forms (FExx) en caracteres standard,
+// force un saut de ligne a chaque transition arabe<->latin, et separe les
+// numeros de scene / didascalies. Sans ca les extraits PDF s'affichent en
+// un seul pave illisible ou le mix FR/AR rend la lecture impossible.
+function normalizeBilingualText(text: string | null | undefined): string {
+  if (!text) return "";
+  let out = String(text).normalize("NFKC");
+  // Saut de ligne a chaque transition entre alphabet latin et arabe.
+  // \p{Script=Latin} et \p{Script=Arabic} ciblent uniquement les lettres
+  // (les chiffres et ponctuations ne declenchent pas un retour ligne).
+  out = out.replace(/(\p{Script=Latin})(\s*)(\p{Script=Arabic})/gu, "$1\n$3");
+  out = out.replace(/(\p{Script=Arabic})(\s*)(\p{Script=Latin})/gu, "$1\n$3");
+  // Saut de ligne avant "<num>. " ou "<num> - " typiquement debut de scene
+  out = out.replace(/\s*(\d{1,3}\s*[-.]\s+)/g, "\n$1");
+  // Saut de ligne avant les didascalies majuscules courantes
+  out = out.replace(
+    /\s+((?:Int|Ext|INT|EXT|FONDU|RACCORD)[\s.\-/])/g,
+    "\n$1"
+  );
+  // Saut de ligne quand un changement de speaker apparait apres un point
+  out = out.replace(/([.!?…])\s+(?=[A-ZÀ-Ý؀-ۿ])/g, "$1\n");
+  // Limite a 2 retours consecutifs
+  out = out.replace(/\n{3,}/g, "\n\n");
+  return out.trim();
+}
+
+// Bloc d'extrait bilingue FR/AR : NFKC + unicode-bidi:plaintext qui isole
+// chaque ligne dans son propre contexte de direction, ce qui rend les
+// melanges français/arabe lisibles sans casser le RTL.
+function BilingualBlock({
+  text,
+  tone = "blue",
+}: {
+  text: string;
+  tone?: "blue" | "amber";
+}) {
+  const colors =
+    tone === "amber"
+      ? "border-amber-200 bg-amber-50/50"
+      : "border-blue-200 bg-blue-50/50";
+  return (
+    <p
+      className={`text-slate-800 leading-loose whitespace-pre-wrap font-sans ${colors}`}
+      style={{
+        unicodeBidi: "plaintext",
+        wordBreak: "break-word",
+        fontFamily:
+          "'Noto Sans Arabic', 'Segoe UI', system-ui, -apple-system, sans-serif",
+      }}
+      dir="auto"
+    >
+      {normalizeBilingualText(text)}
+    </p>
+  );
+}
+
+// Parsing minimaliste du markdown produit par le LLM RAG. On ne tire pas
+// react-markdown pour ne pas alourdir le bundle, le format est tres
+// previsible (titres "##", listes numerotees ou puces, gras "**...**").
+type RAGInline =
+  | { kind: "text"; value: string }
+  | { kind: "bold"; value: string };
+
+type RAGBlock =
+  | { kind: "heading"; text: string }
+  | { kind: "paragraph"; inlines: RAGInline[] }
+  | { kind: "list"; ordered: boolean; items: RAGInline[][] };
+
+function parseInlines(line: string): RAGInline[] {
+  const parts: RAGInline[] = [];
+  const re = /\*\*([^*]+)\*\*/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > last) {
+      parts.push({ kind: "text", value: line.slice(last, m.index) });
+    }
+    parts.push({ kind: "bold", value: m[1] });
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) {
+    parts.push({ kind: "text", value: line.slice(last) });
+  }
+  return parts.length ? parts : [{ kind: "text", value: line }];
+}
+
+function parseRAGMarkdown(text: string): RAGBlock[] {
+  const blocks: RAGBlock[] = [];
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    if (!line) {
+      i++;
+      continue;
+    }
+    const heading = line.match(/^#{1,4}\s+(.+?):?\s*$/);
+    if (heading) {
+      blocks.push({ kind: "heading", text: heading[1].replace(/\*+/g, "") });
+      i++;
+      continue;
+    }
+    // Le LLM ecrit parfois "**Titre :**" seul sur sa ligne — on le promeut en titre.
+    const boldHeading = line.match(/^\*\*([^*]+?)\s*:?\*\*\s*:?\s*$/);
+    if (boldHeading) {
+      blocks.push({ kind: "heading", text: boldHeading[1] });
+      i++;
+      continue;
+    }
+    if (/^(\d+\.|[-*•])\s+/.test(line)) {
+      const items: RAGInline[][] = [];
+      const ordered = /^\d+\./.test(line);
+      while (i < lines.length) {
+        const cur = lines[i].trim();
+        if (!cur) {
+          i++;
+          continue;
+        }
+        const itemMatch = cur.match(/^(?:\d+\.|[-*•])\s+(.+)$/);
+        if (!itemMatch) break;
+        items.push(parseInlines(itemMatch[1]));
+        i++;
+      }
+      blocks.push({ kind: "list", ordered, items });
+      continue;
+    }
+    blocks.push({ kind: "paragraph", inlines: parseInlines(line) });
+    i++;
+  }
+  return blocks;
+}
+
+const RAG_SECTION_META: Record<
+  string,
+  { icon: typeof FileText; tone: string; accent: string }
+> = {
+  synthese: { icon: Sparkles, tone: "text-blue-700", accent: "border-l-blue-500" },
+  interpretation: { icon: BarChart3, tone: "text-violet-700", accent: "border-l-violet-500" },
+  analyse: { icon: Search, tone: "text-amber-700", accent: "border-l-amber-500" },
+  consequence: { icon: AlertTriangle, tone: "text-rose-700", accent: "border-l-rose-500" },
+  duplication: { icon: ClipboardCopy, tone: "text-orange-700", accent: "border-l-orange-500" },
+  moderation: { icon: ShieldAlert, tone: "text-rose-700", accent: "border-l-rose-500" },
+  constantes: { icon: Landmark, tone: "text-emerald-700", accent: "border-l-emerald-500" },
+  limites: { icon: Info, tone: "text-slate-700", accent: "border-l-slate-400" },
+  action: { icon: ListChecks, tone: "text-emerald-700", accent: "border-l-emerald-500" },
+  recommand: { icon: ListChecks, tone: "text-emerald-700", accent: "border-l-emerald-500" },
+  conclusion: { icon: Target, tone: "text-slate-800", accent: "border-l-slate-700" },
+};
+
+function sectionMetaFor(title: string) {
+  const norm = title
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+  for (const key of Object.keys(RAG_SECTION_META)) {
+    if (norm.includes(key)) return RAG_SECTION_META[key];
+  }
+  return { icon: FileText, tone: "text-slate-700", accent: "border-l-slate-400" };
+}
+
+function RAGInlineRun({ parts }: { parts: RAGInline[] }) {
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.kind === "bold" ? (
+          <strong key={i} className="font-semibold text-slate-900">
+            {part.value}
+          </strong>
+        ) : (
+          <span key={i}>{part.value}</span>
+        )
+      )}
+    </>
+  );
+}
+
+function RAGNarrative({ narrative }: { narrative: string }) {
+  const blocks = useMemo(() => parseRAGMarkdown(narrative || ""), [narrative]);
+  if (!narrative?.trim()) {
+    return (
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500 italic">
+        Rapport vide.
+      </div>
+    );
+  }
+
+  // Regroupe les blocs par section : un heading ouvre une nouvelle section,
+  // les blocs suivants y sont accumules jusqu'au prochain heading.
+  const sections: { title: string | null; blocks: RAGBlock[] }[] = [];
+  let current: { title: string | null; blocks: RAGBlock[] } = {
+    title: null,
+    blocks: [],
+  };
+  for (const b of blocks) {
+    if (b.kind === "heading") {
+      if (current.title || current.blocks.length) sections.push(current);
+      current = { title: b.text, blocks: [] };
+    } else {
+      current.blocks.push(b);
+    }
+  }
+  if (current.title || current.blocks.length) sections.push(current);
+
+  return (
+    <div className="space-y-4">
+      {sections.map((section, idx) => {
+        const meta = section.title
+          ? sectionMetaFor(section.title)
+          : { icon: FileText, tone: "text-slate-700", accent: "border-l-slate-300" };
+        const Icon = meta.icon;
+        return (
+          <section
+            key={idx}
+            className={cn(
+              "rounded-r-md border-l-4 bg-white shadow-sm border border-slate-200 px-5 py-4",
+              meta.accent
+            )}
+          >
+            {section.title && (
+              <h3
+                className={cn(
+                  "flex items-center gap-2 font-semibold text-base mb-3",
+                  meta.tone
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {section.title}
+              </h3>
+            )}
+            <div className="space-y-3 text-sm leading-relaxed text-slate-800">
+              {section.blocks.map((b, j) => {
+                if (b.kind === "paragraph") {
+                  return (
+                    <p
+                      key={j}
+                      dir="auto"
+                      style={{ unicodeBidi: "plaintext" }}
+                    >
+                      <RAGInlineRun parts={b.inlines} />
+                    </p>
+                  );
+                }
+                if (b.kind === "list") {
+                  if (b.ordered) {
+                    return (
+                      <ol
+                        key={j}
+                        className="space-y-2 ml-1"
+                        dir="auto"
+                        style={{ unicodeBidi: "plaintext" }}
+                      >
+                        {b.items.map((item, k) => (
+                          <li key={k} className="flex gap-3">
+                            <span className="shrink-0 h-6 w-6 rounded-full bg-ccm-red/10 text-ccm-red text-xs font-semibold flex items-center justify-center">
+                              {k + 1}
+                            </span>
+                            <span className="flex-1">
+                              <RAGInlineRun parts={item} />
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    );
+                  }
+                  return (
+                    <ul
+                      key={j}
+                      className="space-y-2 ml-1"
+                      dir="auto"
+                      style={{ unicodeBidi: "plaintext" }}
+                    >
+                      {b.items.map((item, k) => (
+                        <li key={k} className="flex gap-3">
+                          <span className="shrink-0 mt-1.5 h-1.5 w-1.5 rounded-full bg-ccm-red" />
+                          <span className="flex-1">
+                            <RAGInlineRun parts={item} />
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  );
+                }
+                return null;
+              })}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 interface VulgarityGroup {
   word: string;
   count: number;
@@ -1189,8 +1481,11 @@ function HighlightedExtract({
   expanded: boolean;
   previewChars?: number;
 }) {
-  const cleanText = (text || "").replace(/\s+/g, " ").trim();
-  const cleanHighlight = (highlight || "").replace(/\s+/g, " ").trim();
+  // NFKC : convertit les Arabic Presentation Forms (FExx) en caracteres
+  // arabes standard et reassemble les ligatures, sinon les PDFs marocains
+  // s'affichent en caracteres "decomposes" illisibles.
+  const cleanText = (text || "").normalize("NFKC").replace(/\s+/g, " ").trim();
+  const cleanHighlight = (highlight || "").normalize("NFKC").replace(/\s+/g, " ").trim();
 
   if (!cleanText) return <span className="text-slate-400">non disponible</span>;
 
@@ -1204,7 +1499,11 @@ function HighlightedExtract({
       expanded || cleanText.length <= previewChars
         ? cleanText
         : `${cleanText.slice(0, previewChars).trimEnd()}…`;
-    return <span dir="auto">{display}</span>;
+    return (
+      <span dir="auto" style={{ unicodeBidi: "plaintext" }}>
+        {display}
+      </span>
+    );
   }
 
   // Window selection for non-expanded view: centre on the highlight.
@@ -1227,7 +1526,7 @@ function HighlightedExtract({
   const after = cleanText.slice(idx + cleanHighlight.length, windowEnd);
 
   return (
-    <span dir="auto">
+    <span dir="auto" style={{ unicodeBidi: "plaintext" }}>
       {windowStart > 0 && <span className="text-slate-400">… </span>}
       {before}
       <mark className="bg-amber-200 text-amber-900 px-0.5 rounded font-medium">
@@ -1341,28 +1640,18 @@ function PlagiarismMatchCard({
 
       {/* Side-by-side comparison */}
       {compare && currentChunk && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-          <div className="rounded-md border border-blue-200 bg-blue-50/50 p-3">
-            <p className="text-[10px] uppercase tracking-wide font-semibold text-blue-700 mb-2">
-              Dans votre document ({current})
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+          <div className="rounded-md border border-blue-200 bg-blue-50/40 p-4">
+            <p className="text-[10px] uppercase tracking-wide font-semibold text-blue-700 mb-3 border-b border-blue-200 pb-2">
+              Dans votre document — {current}
             </p>
-            <p
-              className="text-slate-800 leading-relaxed whitespace-pre-wrap"
-              dir="auto"
-            >
-              {currentChunk}
-            </p>
+            <BilingualBlock text={currentChunk} tone="blue" />
           </div>
-          <div className="rounded-md border border-amber-200 bg-amber-50/50 p-3">
-            <p className="text-[10px] uppercase tracking-wide font-semibold text-amber-800 mb-2">
-              Dans le document source ({source})
+          <div className="rounded-md border border-amber-200 bg-amber-50/40 p-4">
+            <p className="text-[10px] uppercase tracking-wide font-semibold text-amber-800 mb-3 border-b border-amber-200 pb-2">
+              Dans le document source — {source}
             </p>
-            <p
-              className="text-slate-800 leading-relaxed whitespace-pre-wrap"
-              dir="auto"
-            >
-              {extract}
-            </p>
+            <BilingualBlock text={extract} tone="amber" />
           </div>
         </div>
       )}
@@ -2601,12 +2890,8 @@ function AdvancedRAGSection({
                 </div>
               )}
 
-            <div
-              className="rounded-md bg-slate-50 border border-slate-200 p-4 text-sm leading-relaxed text-slate-800 whitespace-pre-wrap"
-              dir="auto"
-            >
-              {report.narrative}
-            </div>
+            <RAGNarrative narrative={report.narrative} />
+
 
             <details className="rounded-md border border-slate-200 bg-white p-3">
               <summary className="cursor-pointer text-xs text-slate-600 font-medium">

@@ -258,6 +258,12 @@ class PlagiarismService:
                     "matched_chunk_id": payload.get("chunk_id"),
                     "source_chunk_id": payload.get("chunk_id"),
                     "source_chunk_index": source_chunk_index,
+                    # Propagate source filenames from the Qdrant payload so the
+                    # plagiarism pipeline can label each source group with the
+                    # real scenario name instead of "non disponible".
+                    "original_filename": payload.get("original_filename"),
+                    "stored_filename": payload.get("stored_filename"),
+                    "filename": payload.get("original_filename"),
                     "matched_chunk_text": payload.get("chunk_text"),
                     "matched_chunk_text_display": (
                         payload.get("chunk_text_display")

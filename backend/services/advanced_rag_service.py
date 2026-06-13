@@ -1075,7 +1075,13 @@ production / le comité de lecture.
 
 Contraintes :
 - N'invente aucun fait absent du contexte.
-- Cite les passages par leur numéro (« Passage 2 »).
+- Cite les passages par leur numéro ET par leur document source en utilisant
+exactement le format suivant : « Passage 2 (source : NOM_DU_FICHIER.pdf) ».
+- Le nom du fichier source figure dans la ligne « Document source : … » de
+chaque passage ci-dessus. Si cette ligne contient « non disponible », ecris
+« source non identifiee » au lieu d'inventer un nom.
+- N'invente JAMAIS un nom de fichier source : reprends exactement la chaine
+fournie dans « Document source ».
 - Pour les constantes nationales marocaines, explique uniquement les flags
 fournis dans la section dediee. Toute explication doit citer ou resumer
 l'evidence du chunk correspondant.
@@ -1195,7 +1201,9 @@ au doublon exact.
 4. Enfin, produire les recommandations.
 
 Contraintes STRICTES :
-- Ne jamais inventer de sources.
+- Ne jamais inventer de sources. Quand tu cites un passage externe, utilise
+exactement le nom de fichier fourni dans « Document source externe : … ».
+Si ce champ vaut « non disponible », ecris « source non identifiee ».
 - Ne jamais transformer un doublon exact interne en accusation de plagiat.
 - Ne jamais affirmer une intention volontaire.
 - Ne jamais presenter les anciennes analyses identiques comme plusieurs
@@ -1646,7 +1654,11 @@ def _clean_str(value: Any) -> str:
 def _truncate(value: Any, max_length: int) -> str:
     if value is None:
         return ""
-    text = _WHITESPACE_RE.sub(" ", str(value)).strip()
+    # NFKC : decompose les Arabic Presentation Forms (zone FExx) en caracteres
+    # standard avant d'envoyer au LLM. Sans ca le modele recopie les glyphes
+    # decomposes des PDFs marocains tels quels dans le rapport final.
+    normalized = unicodedata.normalize("NFKC", str(value))
+    text = _WHITESPACE_RE.sub(" ", normalized).strip()
     if not text:
         return ""
     if len(text) <= max_length:

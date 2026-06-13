@@ -19,6 +19,7 @@ import logging
 import re
 from dataclasses import dataclass
 from functools import cmp_to_key
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from backend.core.config import settings
@@ -166,12 +167,15 @@ class PlagiarismPipeline:
             return
         try:
             embeddings = self.embedding_service.generate_embeddings(document.chunks)
+            stored_filename = Path(document.file_path).name if document.file_path else None
             self.vector_service.upsert_chunks(
                 scenario_id=document.scenario_id,
                 chunks=document.chunks,
                 embeddings=embeddings,
                 display_chunks=document.display_chunks,
                 chunk_metadata=document.chunk_metadata,
+                original_filename=document.original_filename,
+                stored_filename=stored_filename,
             )
         except Exception as exc:
             error_message = _root_error_message(exc)
