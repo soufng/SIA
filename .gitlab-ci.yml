@@ -1,0 +1,177 @@
+# GitLab CI/CD — SIA
+#
+# Trois stages :
+#   - test   : pytest backend + typecheck/build frontend (en parallèle)
+#   - build  : build de l'image Docker, smoke test, scan Trivy, push au
+#              registry GitLab uniquement sur main / dev
+#   - deploy : tag ``latest`` sur main (alias du sha buildé)
+#
+# Le registry utilisé est le GitLab Container Registry intégré
+# (``$CI_REGISTRY_IMAGE``) — aucun secret à configurer, les credentials
+# ``$CI_REGISTRY_USER`` / ``$CI_REGISTRY_PASSWORD`` sont fournis par GitLab.
+
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  # Cache pip/npm à la racine du projet pour qu'il soit ramassé par GitLab.
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.cache/npm"
+  IMAGE_TAG: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+  IMAGE_BRANCH: "$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG"
+  IMAGE_LATEST: "$CI_REGISTRY_IMAGE:latest"
+
+# Annule les runs obsolètes dès qu'un nouveau commit arrive sur la même ref.
+default:
+  interruptible: true
+
+# ---------------------------------------------------------------------------
+# Stage : test
+# ---------------------------------------------------------------------------
+
+backend:test:
+  stage: test
+  image: python:3.12-slim
+  cache:
+    key:
+      files:
+        - requirements.txt
+    paths:
+      - .cache/pip
+  variables:
+    SIA_ENV: development
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install pytest httpx
+  script:
+    - pytest tests/ -q --tb=short
+
+frontend:test:
+  stage: test
+  image: node:20-alpine
+  cache:
+    key:
+      files:
+        - frontend/package-lock.json
+    paths:
+      - .cache/npm
+      - frontend/node_modules
+  before_script:
+    - cd frontend
+    - npm ci --cache "$NPM_CONFIG_CACHE"
+  script:
+    - npm run typecheck
+    - npm run build
+  artifacts:
+    when: on_success
+    expire_in: 1 week
+    paths:
+      - frontend/dist/
+
+# ---------------------------------------------------------------------------
+# Stage : build
+#
+# Tourne en mode docker-in-docker. L'image est buildée, smoke-testée, scannée
+# puis poussée sur le registry GitLab. Sur MR / branches non protégées on
+# build + smoke test mais on ne push pas — pas besoin de polluer le registry.
+# ---------------------------------------------------------------------------
+
+build:image:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+  needs:
+    - job: backend:test
+    - job: frontend:test
+  before_script:
+    - docker info
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+  script:
+    # ---------- Build ----------
+    - docker build --pull -t sia-backend:ci -t "$IMAGE_TAG" -t "$IMAGE_BRANCH" .
+
+    # ---------- Smoke test ----------
+    # On vérifie que l'API démarre. Mongo/Qdrant ne sont pas joignables ici :
+    # un 200 ou un 503 (deps down) suffisent — l'important est que le binaire
+    # boot sans crasher.
+    - |
+      docker run -d --name sia_ci -p 8000:8000 \
+        -e SIA_ENV=development \
+        -e SIA_OTP_ENABLED=false \
+        sia-backend:ci
+      ok=0
+      for i in $(seq 1 30); do
+        code=$(docker exec sia_ci sh -c "wget -q -O /dev/null -S http://127.0.0.1:8000/ 2>&1 | awk '/HTTP\\//{print \$2; exit}'" || true)
+        if [ "$code" = "200" ] || [ "$code" = "503" ]; then
+          echo "Backend responded ($code) after ${i}s"
+          ok=1
+          break
+        fi
+        sleep 1
+      done
+      docker logs sia_ci | tail -30
+      docker rm -f sia_ci
+      [ "$ok" = "1" ] || { echo "Backend did not respond within 30s"; exit 1; }
+
+    # ---------- Scan vulnérabilités ----------
+    # Trivy : strict sur main (échec si HIGH/CRITICAL non corrigée), tolérant
+    # ailleurs (signale sans bloquer).
+    - |
+      apk add --no-cache curl
+      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+        | sh -s -- -b /usr/local/bin
+      if [ "$CI_COMMIT_REF_NAME" = "main" ]; then
+        EXIT_CODE=1
+      else
+        EXIT_CODE=0
+      fi
+      trivy image \
+        --severity HIGH,CRITICAL \
+        --ignore-unfixed \
+        --exit-code "$EXIT_CODE" \
+        --no-progress \
+        sia-backend:ci
+
+    # ---------- Push (uniquement sur main / dev) ----------
+    - |
+      if [ "$CI_COMMIT_REF_NAME" = "main" ] || [ "$CI_COMMIT_REF_NAME" = "dev" ]; then
+        docker push "$IMAGE_TAG"
+        docker push "$IMAGE_BRANCH"
+      else
+        echo "Skip push — branche ${CI_COMMIT_REF_NAME} non protégée."
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+
+# ---------------------------------------------------------------------------
+# Stage : deploy
+#
+# Promote l'image buildée en ``:latest`` sur main. Ne tourne que sur la
+# branche protégée — pas sur les MR ni sur dev.
+# ---------------------------------------------------------------------------
+
+deploy:latest:
+  stage: deploy
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  needs:
+    - job: build:image
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+  script:
+    - docker pull "$IMAGE_TAG"
+    - docker tag "$IMAGE_TAG" "$IMAGE_LATEST"
+    - docker push "$IMAGE_LATEST"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
