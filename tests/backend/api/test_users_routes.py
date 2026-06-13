@@ -97,12 +97,20 @@ class FakeAuditRepo:
         *,
         limit: int = 100,
         user_id: str | None = None,
+        username: str | None = None,
         event_type: str | None = None,
         since: str | None = None,
     ) -> list[dict[str, Any]]:
         out = self.events
         if user_id:
             out = [e for e in out if e.get("user_id") == user_id]
+        if username:
+            needle = username.strip().lower()
+            out = [
+                e
+                for e in out
+                if needle in str(e.get("username") or "").lower()
+            ]
         if event_type:
             out = [e for e in out if e.get("event_type") == event_type]
         return out[:limit]
