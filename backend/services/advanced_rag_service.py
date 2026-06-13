@@ -205,22 +205,6 @@ class AdvancedRAGService:
         else:
             user_payload = user_prompt
 
-        if self._should_use_deterministic_report(context):
-            narrative = self._render_fallback_narrative(context)
-            return {
-                "scenario_id": scenario,
-                "generated_at": datetime.now(UTC).isoformat(),
-                "narrative": narrative,
-                "context": self._serialize_context(context),
-                "prompt": user_prompt,
-                "llm": {
-                    "provider": "mock",
-                    "model": "deterministic-template",
-                    "used_fallback": True,
-                    "error": None,
-                },
-            }
-
         try:
             llm_response = self.llm_provider.complete(
                 system=SYSTEM_PROMPT,
@@ -257,20 +241,6 @@ class AdvancedRAGService:
                 "error": error,
             },
         }
-
-    @staticmethod
-    def _should_use_deterministic_report(context: RAGContext) -> bool:
-        """Short-circuit the LLM only when no real provider is configured.
-
-        Historically this method also skipped the LLM for exact duplicates
-        and for "Moroccan flags + zero plagiarism passages" — the reasoning
-        being that the LLM could not add new evidence. We now want the LLM
-        to act as a contextual *second reader* even in those cases (explain
-        the Moroccan flags, suggest reformulations), so the short-circuit
-        is intentionally removed. The mock-provider check below ensures we
-        still avoid a useless LLM round-trip when no real provider is set.
-        """
-        return False
 
     # ---------- Context building ----------
 

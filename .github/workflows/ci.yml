@@ -37,8 +37,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # Test-only deps qui ne sont pas dans requirements.txt
-          pip install pytest pydantic-settings pyjwt python-multipart httpx
+          # Test-only deps (httpx pour FastAPI TestClient, pytest pour le runner).
+          pip install pytest httpx
 
       - name: Run pytest
         env:
