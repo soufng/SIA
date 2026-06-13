@@ -1,9 +1,11 @@
 fastapi
 uvicorn[standard]
+python-multipart
+pydantic
+pydantic-settings
 pymongo
 qdrant-client
 sentence-transformers
 PyMuPDF
 python-dotenv
-pydantic
 slowapi
