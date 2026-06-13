@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, dev]
   pull_request:
-    branches: [main, develop]
+    branches: [main, dev]
   # Permet de déclencher manuellement depuis l'onglet Actions.
   workflow_dispatch:
 
@@ -13,6 +13,11 @@ on:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+# Permissions par défaut minimales ; le job ``docker`` les surcharge
+# pour pouvoir pusher l'image vers GHCR.
+permissions:
+  contents: read
 
 jobs:
   # -------------------------------------------------------------------------
@@ -79,8 +84,9 @@ jobs:
 
   # -------------------------------------------------------------------------
   # Build de l'image Docker — confirme que le Dockerfile est valide et que
-  # le binaire fonctionne en cold start. Ne push pas vers un registry par
-  # défaut ; ajoutez `docker/login-action` + `tags:` si vous voulez pusher.
+  # le binaire fonctionne en cold start. Sur un ``push`` vers main ou dev
+  # (mais pas sur une PR, où les secrets seraient absents), l'image est
+  # poussée vers GitHub Container Registry après validation du smoke test.
   # -------------------------------------------------------------------------
   docker:
     name: Docker image build
@@ -89,6 +95,13 @@ jobs:
     # Dépend des deux jobs précédents : ne perdre pas de temps à builder
     # l'image si le code ne compile pas / ne passe pas les tests.
     needs: [backend, frontend]
+    # Le ``contents`` read par défaut ne suffit pas pour pusher vers GHCR.
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/sia-backend
 
     steps:
       - name: Checkout
@@ -97,7 +110,7 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build backend image (no push)
+      - name: Build backend image (local load pour le smoke test)
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -109,7 +122,7 @@ jobs:
 
       - name: Smoke test image
         run: |
-          # Vérifie que l'image démarre l'API et répond bien sur /health.
+          # Vérifie que l'image démarre l'API et répond bien sur /.
           # Mongo/Qdrant ne sont pas joignables ici donc on accepte aussi
           # bien un 200 qu'un 503 — l'important est que l'application boot.
           docker run -d --name sia_ci -p 8000:8000 \
@@ -130,3 +143,41 @@ jobs:
           docker logs sia_ci || true
           docker rm -f sia_ci
           exit 1
+
+      # ---------- CD : push vers GitHub Container Registry ----------
+      # Saute proprement les PR (pas de secret disponible pour les forks)
+      # et les déclenchements manuels qui ne ciblent pas une branche
+      # protégée.
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        id: tags
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          # Pour ``main``  → tags ``main``, ``sha-<short>``, ``latest``.
+          # Pour ``dev``   → tags ``dev``,  ``sha-<short>``.
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Push image to GHCR
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ steps.tags.outputs.labels }}
+          # Le build a déjà eu lieu plus haut ; le cache GHA évite de
+          # recompiler.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
