@@ -1,10 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, Upload as UploadIcon } from "lucide-react";
+import {
+  BarChart3,
+  CheckCircle2,
+  Circle,
+  Database,
+  FileText,
+  Landmark,
+  Layers,
+  Loader2,
+  Search,
+  ShieldAlert,
+  Upload as UploadIcon,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Button } from "./ui/button";
 import { Alert } from "./ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { cn } from "@/lib/utils";
 import {
   analyzePdfAsync,
   fetchJobState,
@@ -25,6 +39,79 @@ const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 // que le job est ``running``, c'est le ``stage`` retourné par l'API qui
 // gouverne ce qu'on affiche.
 const FALLBACK_STAGE_LABEL = "Préparation de l'analyse";
+
+// Pipeline UI map. The backend only reports 4 coarse stages (start /
+// pipeline / persist / done) and pegs everything between them at 40–90%.
+// We surface the actual internal stages of ``analyze_scenario`` here so
+// the operator sees which step is running. The ``range`` is in
+// ``progress_pct`` units — once the bar crosses a step's upper bound,
+// that step is marked done.
+interface PipelineStep {
+  key: string;
+  label: string;
+  icon: LucideIcon;
+  range: [number, number];
+}
+
+const PIPELINE_STEPS: PipelineStep[] = [
+  {
+    key: "upload",
+    label: "Réception et préparation du fichier",
+    icon: UploadIcon,
+    range: [0, 10],
+  },
+  {
+    key: "extract",
+    label: "Extraction et nettoyage du PDF",
+    icon: FileText,
+    range: [10, 30],
+  },
+  {
+    key: "chunk",
+    label: "Segmentation et embeddings (e5-base)",
+    icon: Layers,
+    range: [30, 50],
+  },
+  {
+    key: "plagiarism",
+    label: "Détection de plagiat (Qdrant)",
+    icon: Search,
+    range: [50, 65],
+  },
+  {
+    key: "moderation",
+    label: "Modération multilingue (FR / AR / Darija)",
+    icon: ShieldAlert,
+    range: [65, 78],
+  },
+  {
+    key: "constants",
+    label: "Vérification des constantes marocaines",
+    icon: Landmark,
+    range: [78, 85],
+  },
+  {
+    key: "rag",
+    label: "Synthèse RAG et rapport éditorial",
+    icon: BarChart3,
+    range: [85, 95],
+  },
+  {
+    key: "persist",
+    label: "Enregistrement de l'analyse",
+    icon: Database,
+    range: [95, 100],
+  },
+];
+
+function getStepStatus(
+  step: PipelineStep,
+  progressPct: number,
+): "done" | "active" | "pending" {
+  if (progressPct >= step.range[1]) return "done";
+  if (progressPct >= step.range[0]) return "active";
+  return "pending";
+}
 
 export function UploadForm() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -224,6 +311,55 @@ export function UploadForm() {
                 ? `Job ${jobId.slice(0, 8)} — l'analyse se déroule côté serveur. La progression vient du backend.`
                 : "Envoi du fichier en cours..."}
             </p>
+
+            {/* Pipeline stepper — surfaces each internal step that is
+                currently running underneath the progress bar. */}
+            <ol className="mt-3 space-y-1.5 rounded-md border border-slate-200 bg-slate-50/60 p-3">
+              {PIPELINE_STEPS.map((step) => {
+                const status = getStepStatus(step, progressPct);
+                const Icon = step.icon;
+                return (
+                  <li
+                    key={step.key}
+                    className={cn(
+                      "flex items-center gap-2.5 text-[12px] transition-colors",
+                      status === "done" && "text-emerald-700",
+                      status === "active" && "text-ccm-red font-medium",
+                      status === "pending" && "text-slate-400",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors",
+                        status === "done" && "bg-emerald-100 text-emerald-700",
+                        status === "active" && "bg-ccm-red/10 text-ccm-red",
+                        status === "pending" && "bg-slate-200 text-slate-400",
+                      )}
+                    >
+                      {status === "done" ? (
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      ) : status === "active" ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Circle className="h-3.5 w-3.5" />
+                      )}
+                    </span>
+                    <Icon
+                      className={cn(
+                        "h-3.5 w-3.5 shrink-0 transition-opacity",
+                        status === "pending" && "opacity-60",
+                      )}
+                    />
+                    <span className="truncate">{step.label}</span>
+                    {status === "active" && (
+                      <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-ccm-red/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ccm-red">
+                        en cours
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
           </div>
         )}
 

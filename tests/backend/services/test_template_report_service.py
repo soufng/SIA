@@ -489,7 +489,7 @@ def test_summary_contains_risk_justification() -> None:
     )
 
     summary = result["summary"]
-    assert "Le niveau HIGH est principalement justifié par" in summary
+    assert "Le niveau ÉLEVÉ est principalement justifié par" in summary
     # Primary driver is the similarity (the one that crossed the HIGH threshold).
     assert "score de similarité élevé de" in summary
     # Vulgarity is mentioned as a secondary signal, not as a justifier.
@@ -532,7 +532,7 @@ def test_conclusion_section_present_with_correct_tone() -> None:
     )
     assert "Conclusion" in high["generated_report"]
     assert "doit être revu manuellement" in high["conclusion"]
-    assert "HIGH" in high["conclusion"]
+    assert "ÉLEVÉ" in high["conclusion"]
 
     medium = service.generate_report(
         "s1",
@@ -980,7 +980,7 @@ def test_generated_report_mentions_exact_duplicate_without_partial_matches() -> 
 
     report = result["generated_report"]
     assert result["risk_level"] == "high"
-    assert "doublon exact deja analyse" in result["summary"]
+    assert "doublon exact déjà analysé" in result["summary"]
     assert "Doublon exact" in report
     assert "5 fois" in report
     assert "plagiat partiel" in report

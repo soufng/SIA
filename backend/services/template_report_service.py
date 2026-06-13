@@ -241,8 +241,8 @@ class TemplateReportService:
             primary = secondaries.pop(0)
 
         head = (
-            f"Le niveau {risk_level.upper()} est principalement justifié par "
-            f"{primary}."
+            f"Le niveau {self._risk_level_label_fr(risk_level)} est "
+            f"principalement justifié par {primary}."
         )
 
         if not secondaries:
@@ -280,16 +280,16 @@ class TemplateReportService:
 
         if exact_duplicate:
             count_text = (
-                f"{duplicate_count} analyse(s) anterieure(s)"
+                f"{duplicate_count} analyse(s) antérieure(s)"
                 if duplicate_count
-                else "une analyse anterieure"
+                else "une analyse antérieure"
             )
             candidates.append(
                 {
                     "kind": "exact_duplicate",
                     "level_match": "high",
                     "intensity": 1.0,
-                    "text": f"un doublon exact deja analyse ({count_text})",
+                    "text": f"un doublon exact déjà analysé ({count_text})",
                     "value": 1.0,
                 }
             )
@@ -720,8 +720,8 @@ class TemplateReportService:
         if risk_level == "high":
             base = (
                 "Le document doit être revu manuellement avant validation. "
-                f"Le risque HIGH est principalement lié à "
-                f"{self._reason_short(rag_context)}."
+                f"Le risque {self._risk_level_label_fr(risk_level)} est "
+                f"principalement lié à {self._reason_short(rag_context)}."
             )
         elif risk_level == "medium":
             base = (
@@ -979,12 +979,29 @@ class TemplateReportService:
 
     @staticmethod
     def _format_score_over_100(value: Any) -> str:
-        """Render a 0..100 moderation score with an explicit unit."""
+        """Render a 0..100 moderation score with an explicit unit.
+
+        Accepts both fractions (0..1) and percentages (0..100); fractions
+        are scaled up so the rendered figure matches the indicator badge.
+        """
         try:
             number = float(value or 0.0)
         except (TypeError, ValueError):
             number = 0.0
+        if 0 < number <= 1:
+            number *= 100
         return f"{number:.2f} / 100"
+
+    @staticmethod
+    def _risk_level_label_fr(risk_level: str) -> str:
+        mapping = {
+            "low": "FAIBLE",
+            "medium": "MODÉRÉ",
+            "high": "ÉLEVÉ",
+            "tres_eleve": "TRÈS ÉLEVÉ",
+            "très élevé": "TRÈS ÉLEVÉ",
+        }
+        return mapping.get(str(risk_level or "").lower(), str(risk_level).upper())
 
     def _validate_inputs(
         self,

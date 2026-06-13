@@ -160,39 +160,78 @@ function StrictMatchBanner({ match }: { match: StrictMatch | undefined }) {
     StrictMatchVerdict,
     {
       bg: string;
+      border: string;
+      iconBg: string;
       icon: typeof ShieldAlert;
       title: string;
       tone: "high" | "medium" | "low" | "info";
+      gaugeStroke: string;
+      gaugeText: string;
+      kicker: string;
+      kickerColor: string;
+      accentBar: string;
     }
   > = {
     identical: {
-      bg: "bg-red-50 border-red-300 text-red-900",
+      bg: "bg-gradient-to-br from-red-50 via-white to-red-50/40",
+      border: "border-ccm-red/40",
+      iconBg: "bg-gradient-to-br from-ccm-red-light via-ccm-red to-ccm-red-dark text-white ring-ccm-gold/30",
       icon: ShieldAlert,
       title: "Scénario STRICTEMENT IDENTIQUE",
       tone: "high",
+      gaugeStroke: "#b91c1c",
+      gaugeText: "text-ccm-red-dark",
+      kicker: "Doublon exact détecté",
+      kickerColor: "text-ccm-red-dark",
+      accentBar: "from-ccm-red via-ccm-red-light to-ccm-gold",
     },
     near_identical: {
-      bg: "bg-amber-50 border-amber-300 text-amber-900",
+      bg: "bg-gradient-to-br from-amber-50 via-white to-amber-50/40",
+      border: "border-amber-400/50",
+      iconBg: "bg-gradient-to-br from-amber-300 via-amber-500 to-orange-600 text-white ring-amber-200",
       icon: AlertTriangle,
       title: "Scénario QUASI-IDENTIQUE",
       tone: "medium",
+      gaugeStroke: "#d97706",
+      gaugeText: "text-amber-700",
+      kicker: "Modifications mineures détectées",
+      kickerColor: "text-amber-700",
+      accentBar: "from-amber-400 via-orange-500 to-amber-500",
     },
     highly_similar: {
-      bg: "bg-yellow-50 border-yellow-300 text-yellow-900",
+      bg: "bg-gradient-to-br from-yellow-50 via-white to-yellow-50/40",
+      border: "border-yellow-400/50",
+      iconBg: "bg-gradient-to-br from-yellow-300 via-yellow-500 to-amber-600 text-white ring-yellow-200",
       icon: Info,
       title: "Scénario FORTEMENT SIMILAIRE",
       tone: "medium",
+      gaugeStroke: "#ca8a04",
+      gaugeText: "text-yellow-700",
+      kicker: "Forte proximité avec un scénario antérieur",
+      kickerColor: "text-yellow-700",
+      accentBar: "from-yellow-400 via-amber-500 to-yellow-500",
     },
     different: {
-      bg: "bg-emerald-50 border-emerald-300 text-emerald-900",
+      bg: "bg-gradient-to-br from-emerald-50 via-white to-teal-50/40",
+      border: "border-emerald-300/60",
+      iconBg: "bg-gradient-to-br from-emerald-400 via-emerald-500 to-teal-600 text-white ring-emerald-200",
       icon: CheckCircle2,
       title: "NOUVEAU scénario",
       tone: "low",
+      gaugeStroke: "#10b981",
+      gaugeText: "text-emerald-700",
+      kicker: "Aucune correspondance antérieure",
+      kickerColor: "text-emerald-700",
+      accentBar: "from-emerald-400 via-teal-500 to-emerald-500",
     },
   };
 
   const style = VERDICT_STYLES[match.verdict];
   const Icon = style.icon;
+  const scorePct = Math.max(0, Math.min(100, match.score_percent));
+  const radius = 32;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference * (1 - scorePct / 100);
   const matched = match.matched_analysis;
 
   const matchedName =
@@ -235,35 +274,107 @@ function StrictMatchBanner({ match }: { match: StrictMatch | undefined }) {
   };
 
   return (
-    <div className={cn("rounded-lg border-2 p-5 space-y-3", style.bg)}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <Icon className="h-6 w-6 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-lg font-bold tracking-tight">{headline}</p>
-            <p className="text-sm mt-0.5 opacity-90">{match.reason}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Badge
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-2xl border-2 p-5 shadow-sm space-y-4",
+        style.bg,
+        style.border,
+      )}
+    >
+      {/* Decorative blobs to lift the surface */}
+      <div
+        className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full blur-3xl opacity-30"
+        style={{ background: style.gaugeStroke }}
+      />
+      <div
+        className="pointer-events-none absolute -left-16 -bottom-16 h-40 w-40 rounded-full blur-3xl opacity-20"
+        style={{ background: style.gaugeStroke }}
+      />
+
+      <div className="relative flex flex-wrap items-start justify-between gap-5">
+        {/* Left — kicker + headline + reason */}
+        <div className="flex items-start gap-4 min-w-0 flex-1">
+          <span
             className={cn(
-              "font-mono text-sm px-3 py-1",
-              match.verdict === "identical" && "bg-red-600 text-white border-0",
-              match.verdict === "near_identical" &&
-                "bg-amber-500 text-white border-0",
-              match.verdict === "highly_similar" &&
-                "bg-yellow-500 text-white border-0",
-              match.verdict === "different" &&
-                "bg-emerald-600 text-white border-0",
+              "relative inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl shadow-md ring-1",
+              style.iconBg,
             )}
           >
-            {match.score_percent.toFixed(2)}%
-          </Badge>
-          {match.is_renewal_candidate && (
-            <Badge className="bg-white text-ccm-red border-ccm-red font-semibold uppercase tracking-wide text-xs">
-              ✓ Prolongation candidate
-            </Badge>
-          )}
+            <Icon className="h-5 w-5" />
+            {match.verdict === "different" && (
+              <span className="absolute -right-1 -top-1 inline-flex h-3.5 w-3.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-3.5 w-3.5 rounded-full bg-emerald-500 ring-2 ring-white" />
+              </span>
+            )}
+          </span>
+          <div className="min-w-0">
+            <p
+              className={cn(
+                "text-[10px] font-semibold uppercase tracking-[0.18em]",
+                style.kickerColor,
+              )}
+            >
+              {style.kicker}
+            </p>
+            <p className="mt-1 text-xl font-bold tracking-tight text-ccm-ink">
+              {headline}
+            </p>
+            <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+              {match.reason}
+            </p>
+            {match.is_renewal_candidate && (
+              <span className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-ccm-red bg-white px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-ccm-red">
+                <CheckCircle2 className="h-3 w-3" />
+                Prolongation candidate
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Right — circular gauge with score */}
+        <div className="flex shrink-0 flex-col items-center gap-1">
+          <div className="relative h-20 w-20">
+            <svg
+              viewBox="0 0 80 80"
+              className="h-full w-full -rotate-90"
+              aria-hidden
+            >
+              <circle
+                cx="40"
+                cy="40"
+                r={radius}
+                fill="none"
+                stroke="rgba(15,23,42,0.08)"
+                strokeWidth="6"
+              />
+              <circle
+                cx="40"
+                cy="40"
+                r={radius}
+                fill="none"
+                stroke={style.gaugeStroke}
+                strokeWidth="6"
+                strokeLinecap="round"
+                strokeDasharray={circumference}
+                strokeDashoffset={dashOffset}
+                style={{ transition: "stroke-dashoffset 700ms ease-out" }}
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span
+                className={cn(
+                  "font-mono text-base font-bold tabular-nums",
+                  style.gaugeText,
+                )}
+              >
+                {scorePct.toFixed(0)}%
+              </span>
+            </div>
+          </div>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            Similarité
+          </p>
         </div>
       </div>
 
@@ -361,18 +472,32 @@ function StrictMatchBanner({ match }: { match: StrictMatch | undefined }) {
         </div>
       )}
 
-      <p className="text-[11px] opacity-60 italic pt-1 border-t border-current/10">
-        Comparé à {match.candidates_compared} analyse(s) historique(s).
+      <div className="relative flex flex-wrap items-center justify-between gap-3 border-t border-slate-200/60 pt-3">
+        <span className="inline-flex items-center gap-2 rounded-full bg-white/70 px-2.5 py-1 text-[11px] font-medium text-slate-600 ring-1 ring-slate-200 backdrop-blur">
+          <Search className="h-3 w-3" />
+          Comparé à
+          <span className="font-mono font-bold tabular-nums text-ccm-ink">
+            {match.candidates_compared}
+          </span>
+          analyse{match.candidates_compared > 1 ? "s" : ""} historique
+          {match.candidates_compared > 1 ? "s" : ""}
+        </span>
         {match.is_renewal_candidate && match.verdict === "identical" && (
-          <>
-            {" "}
-            <strong>
-              Cette analyse peut être utilisée pour une demande de
-              prolongation d'autorisation de tournage.
-            </strong>
-          </>
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-ccm-red/10 px-2.5 py-1 text-[11px] font-semibold text-ccm-red-dark ring-1 ring-ccm-red/30">
+            <Info className="h-3 w-3" />
+            Réutilisable pour une demande de prolongation d'autorisation
+          </span>
         )}
-      </p>
+      </div>
+
+      {/* Bottom accent line — consistent with the recommendations /
+          conclusion / pipeline cards. */}
+      <div
+        className={cn(
+          "absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r opacity-80",
+          style.accentBar,
+        )}
+      />
     </div>
   );
 }
@@ -718,8 +843,9 @@ function SummarySection({ analysis }: { analysis: Analysis }) {
     `contenu adulte ${Math.round(adultScore)}%, ` +
     `constantes Maroc ${Math.round(moroccanScore)}%.` +
     (rag.risk_level_floored_by
-      ? ` Le score a été élevé au seuil ÉLEVÉ (75%) parce que la vérification ` +
-        `des constantes nationales a déclenché une escalade automatique.`
+      ? ` Le score a été relevé au niveau ${theme.label.replace("Risque ", "").toUpperCase()} ` +
+        `parce que la vérification des constantes nationales a déclenché ` +
+        `une escalade automatique.`
       : "");
 
   return (
@@ -1412,47 +1538,77 @@ function PlagiarismSection({ plagiarism }: { plagiarism: Plagiarism }) {
 
   if (allMatches.length === 0 && sources.length === 0 && !exactDuplicate) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Analyse plagiat</CardTitle>
+      <Card className="relative overflow-hidden border-slate-200">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-emerald-200/40 blur-3xl" />
+        <CardHeader className="relative">
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 via-emerald-500 to-teal-600 text-white shadow-md ring-1 ring-emerald-200">
+              <Search className="h-4 w-4" />
+            </span>
+            <span>
+              Analyse plagiat
+              <span className="ml-2 text-xs font-normal text-emerald-700">
+                Aucun signal détecté
+              </span>
+            </span>
+          </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="relative">
           <Alert variant="info">
             Aucun passage similaire significatif n'a été détecté.
           </Alert>
         </CardContent>
+        <div className="h-1 bg-gradient-to-r from-emerald-400 via-teal-500 to-emerald-500 opacity-70" />
       </Card>
     );
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <CardTitle>Analyse plagiat</CardTitle>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <Badge className="bg-ccm-red/10 text-ccm-red border-ccm-red/20">
-              {totalMatches} passage(s) détecté(s)
-            </Badge>
-            <Badge className="bg-slate-100 text-slate-700 border-slate-200">
-              {totalSources} document(s) source
-            </Badge>
+    <Card className="relative overflow-hidden border-slate-200">
+      {/* CCM identity glow */}
+      <div className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-ccm-red/10 blur-3xl" />
+      <div className="pointer-events-none absolute -left-20 -bottom-20 h-40 w-40 rounded-full bg-ccm-gold/10 blur-3xl" />
+
+      <CardHeader className="relative">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-ccm-red-light via-ccm-red to-ccm-red-dark text-white shadow-md shadow-ccm-red/30 ring-1 ring-ccm-gold/30">
+              <Search className="h-4 w-4" />
+            </span>
+            <span>
+              Analyse plagiat
+              <span className="ml-2 text-xs font-normal text-slate-500">
+                Recherche par similarité sémantique
+              </span>
+            </span>
+          </CardTitle>
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-ccm-red/10 px-2.5 py-1 font-semibold text-ccm-red-dark ring-1 ring-ccm-red/30">
+              <span className="font-mono tabular-nums">{totalMatches}</span>
+              passage{totalMatches > 1 ? "s" : ""}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700 ring-1 ring-slate-200">
+              <FileText className="h-3 w-3" />
+              <span className="font-mono tabular-nums">{totalSources}</span>
+              source{totalSources > 1 ? "s" : ""}
+            </span>
             {isTruncated && (
-              <Badge className="bg-amber-100 text-amber-700 border-amber-200">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 font-semibold text-amber-800 ring-1 ring-amber-200">
+                <AlertTriangle className="h-3 w-3" />
                 Résultats tronqués
-              </Badge>
+              </span>
             )}
           </div>
         </div>
         {isTruncated && (
-          <p className="mt-2 text-xs text-slate-500 italic">
+          <p className="mt-2 text-xs italic text-slate-500">
             {displayedMatches} passages affichés sur {totalMatches} détectés.
             Les passages sont regroupés par document source et triés par score
             décroissant après déduplication.
           </p>
         )}
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="relative space-y-5">
         {exactDuplicate && (
           <ExactDuplicatePanel
             duplicateCount={duplicateCount}
@@ -1460,9 +1616,16 @@ function PlagiarismSection({ plagiarism }: { plagiarism: Plagiarism }) {
           />
         )}
         {allMatches.length > 0 || sources.length > 0 ? (
-          <h3 className="text-sm font-semibold text-slate-800">
-            Passages similaires partiels
-          </h3>
+          <div className="flex items-center gap-2 border-l-4 border-ccm-red/40 pl-3">
+            <h3 className="text-sm font-semibold text-ccm-ink">
+              Passages similaires partiels
+            </h3>
+            <span className="text-xs text-slate-500">
+              {sources.length > 0
+                ? `regroupés sur ${sources.length} document${sources.length > 1 ? "s" : ""} source`
+                : `${allMatches.length} passage${allMatches.length > 1 ? "s" : ""}`}
+            </span>
+          </div>
         ) : (
           <Alert variant="info">
             Aucun passage similaire partiel significatif n'a été détecté.
@@ -1502,6 +1665,7 @@ function PlagiarismSection({ plagiarism }: { plagiarism: Plagiarism }) {
           </>
         ) : null}
       </CardContent>
+      <div className="h-1 bg-gradient-to-r from-ccm-red via-ccm-red-light to-ccm-gold opacity-70" />
     </Card>
   );
 }
@@ -1518,18 +1682,80 @@ function ModerationSection({ analysis }: { analysis: Analysis }) {
   const vulgMatches: VulgarityMatch[] = profanity.vulgarity_matches ?? [];
   const nudityMatches: NudityMatch[] = adult.nudity_matches ?? [];
   const grouped = useMemo(() => groupVulgarity(vulgMatches), [vulgMatches]);
+  const profanityScore = Number(profanity.profanity_score ?? 0);
+  const adultScore = Number(adult.adult_content_score ?? 0);
+  const profPct = profanityScore <= 1 ? profanityScore * 100 : profanityScore;
+  const adultPct = adultScore <= 1 ? adultScore * 100 : adultScore;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Analyse modération</CardTitle>
+    <Card className="relative overflow-hidden border-slate-200">
+      {/* CCM-aligned glows */}
+      <div className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-ccm-red/10 blur-3xl" />
+      <div className="pointer-events-none absolute -left-20 -bottom-20 h-40 w-40 rounded-full bg-rose-300/15 blur-3xl" />
+
+      <CardHeader className="relative">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-ccm-red-light via-ccm-red to-ccm-red-dark text-white shadow-md shadow-ccm-red/30 ring-1 ring-ccm-gold/30">
+              <ShieldAlert className="h-4 w-4" />
+            </span>
+            <span>
+              Analyse modération
+              <span className="ml-2 text-xs font-normal text-slate-500">
+                Vulgarité &amp; contenu adulte · FR / AR / Darija
+              </span>
+            </span>
+          </CardTitle>
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-semibold ring-1",
+                profPct >= 60
+                  ? "bg-rose-100 text-rose-700 ring-rose-200"
+                  : profPct >= 20
+                    ? "bg-amber-100 text-amber-700 ring-amber-200"
+                    : "bg-emerald-100 text-emerald-700 ring-emerald-200",
+              )}
+            >
+              <ShieldAlert className="h-3 w-3" />
+              Vulgarité
+              <span className="font-mono tabular-nums">
+                {profPct.toFixed(0)}%
+              </span>
+            </span>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-semibold ring-1",
+                adultPct >= 60
+                  ? "bg-rose-100 text-rose-700 ring-rose-200"
+                  : adultPct >= 20
+                    ? "bg-amber-100 text-amber-700 ring-amber-200"
+                    : "bg-emerald-100 text-emerald-700 ring-emerald-200",
+              )}
+            >
+              <AlertTriangle className="h-3 w-3" />
+              Adulte
+              <span className="font-mono tabular-nums">
+                {adultPct.toFixed(0)}%
+              </span>
+            </span>
+          </div>
+        </div>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="relative space-y-6">
         {/* Vulgarité — Résumé groupé */}
         <div>
-          <h3 className="text-sm font-semibold text-ccm-ink mb-2">
-            Résumé des mots détectés
-          </h3>
+          <div className="mb-2 flex items-center gap-2 border-l-4 border-ccm-red/40 pl-3">
+            <h3 className="text-sm font-semibold text-ccm-ink">
+              Résumé des mots détectés
+            </h3>
+            {grouped.length > 0 && (
+              <span className="text-xs text-slate-500">
+                {grouped.length} mot{grouped.length > 1 ? "s" : ""} unique
+                {grouped.length > 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
           {grouped.length === 0 ? (
             <Alert variant="info">
               Aucune vulgarité significative n'a été détectée.
@@ -1563,9 +1789,15 @@ function ModerationSection({ analysis }: { analysis: Analysis }) {
         {/* Vulgarité — passages détaillés */}
         {vulgMatches.length > 0 && (
           <div>
-            <h3 className="text-sm font-semibold text-ccm-ink mb-2">
-              Passages contenant des mots vulgaires
-            </h3>
+            <div className="mb-2 flex items-center gap-2 border-l-4 border-ccm-red/40 pl-3">
+              <h3 className="text-sm font-semibold text-ccm-ink">
+                Passages contenant des mots vulgaires
+              </h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-ccm-red/10 px-2 py-0.5 text-[10px] font-semibold text-ccm-red-dark ring-1 ring-ccm-red/30">
+                <span className="font-mono tabular-nums">{vulgMatches.length}</span>
+                occurrence{vulgMatches.length > 1 ? "s" : ""}
+              </span>
+            </div>
             <Table>
               <THead>
                 <Tr>
@@ -1602,9 +1834,15 @@ function ModerationSection({ analysis }: { analysis: Analysis }) {
         {/* Contenu adulte — passages détaillés avec page */}
         {nudityMatches.length > 0 && (
           <div>
-            <h3 className="text-sm font-semibold text-ccm-ink mb-2">
-              Passages contenant du contenu adulte / nudité
-            </h3>
+            <div className="mb-2 flex items-center gap-2 border-l-4 border-rose-400/50 pl-3">
+              <h3 className="text-sm font-semibold text-ccm-ink">
+                Passages contenant du contenu adulte / nudité
+              </h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700 ring-1 ring-rose-200">
+                <span className="font-mono tabular-nums">{nudityMatches.length}</span>
+                occurrence{nudityMatches.length > 1 ? "s" : ""}
+              </span>
+            </div>
             <Table>
               <THead>
                 <Tr>
@@ -1638,6 +1876,7 @@ function ModerationSection({ analysis }: { analysis: Analysis }) {
           </div>
         )}
       </CardContent>
+      <div className="h-1 bg-gradient-to-r from-ccm-red via-rose-500 to-ccm-gold opacity-70" />
     </Card>
   );
 }
@@ -2404,33 +2643,54 @@ function AdvancedRAGSection({
 }
 
 function RecommendationsSection({ items }: { items: string[] }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Recommandations</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {items.length === 0 ? (
+  if (items.length === 0) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
           <Alert variant="info">Aucune recommandation disponible.</Alert>
-        ) : (
-          <Table>
-            <THead>
-              <Tr>
-                <Th className="w-12">#</Th>
-                <Th>Action recommandée</Th>
-              </Tr>
-            </THead>
-            <TBody>
-              {items.map((r, i) => (
-                <Tr key={i}>
-                  <Td className="font-mono text-slate-500">{i + 1}</Td>
-                  <Td className="text-slate-800">{r}</Td>
-                </Tr>
-              ))}
-            </TBody>
-          </Table>
-        )}
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card className="relative overflow-hidden border-slate-200">
+      {/* Subtle CCM glow in the corner */}
+      <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-ccm-red/10 blur-3xl" />
+      <CardHeader className="relative">
+        <CardTitle className="flex items-center gap-2.5">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-ccm-red-light via-ccm-red to-ccm-red-dark text-white shadow-md shadow-ccm-red/30 ring-1 ring-ccm-gold/30">
+            <ListChecks className="h-4 w-4" />
+          </span>
+          <span>
+            Recommandations
+            <span className="ml-2 text-xs font-normal text-slate-500">
+              {items.length} action{items.length > 1 ? "s" : ""} à entreprendre
+            </span>
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="relative">
+        <ol className="space-y-2.5">
+          {items.map((r, i) => (
+            <li
+              key={i}
+              className="group relative flex gap-3 rounded-lg border border-slate-200 bg-white p-3 transition-all hover:border-ccm-red/30 hover:shadow-[0_8px_24px_-12px_rgba(193,39,45,0.35)]"
+            >
+              {/* Numbered gradient badge */}
+              <span className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-ccm-red-light via-ccm-red to-ccm-red-dark font-mono text-xs font-bold text-white shadow-sm ring-1 ring-ccm-gold/25 transition-transform group-hover:scale-105">
+                {i + 1}
+              </span>
+              <p className="pt-0.5 text-sm leading-relaxed text-slate-700">
+                {r}
+              </p>
+              {/* Left accent bar that lights up on hover */}
+              <span className="pointer-events-none absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-gradient-to-b from-ccm-red to-ccm-gold opacity-0 transition-opacity group-hover:opacity-100" />
+            </li>
+          ))}
+        </ol>
       </CardContent>
+      {/* Bottom accent line */}
+      <div className="h-1 bg-gradient-to-r from-ccm-red via-ccm-red-light to-ccm-gold opacity-70" />
     </Card>
   );
 }
@@ -3070,18 +3330,24 @@ const TOC_ITEMS: { id: string; label: string }[] = [
   { id: "plagiat", label: "Plagiat" },
   { id: "moderation", label: "Modération" },
   { id: "constantes-maroc", label: "Constantes Maroc" },
-  { id: "decision", label: "Recommandations" },
   { id: "rapport-ia", label: "Rapport IA" },
+  { id: "recommandations", label: "Recommandations" },
+  { id: "conclusion", label: "Conclusion" },
 ];
 
-function TableOfContents() {
+function TableOfContents({
+  hiddenIds = [],
+}: {
+  hiddenIds?: string[];
+}) {
+  const items = TOC_ITEMS.filter((item) => !hiddenIds.includes(item.id));
   return (
     <nav
       aria-label="Sommaire du rapport"
       className="sticky top-2 z-10 -mx-1 mb-2 overflow-x-auto rounded-md border border-slate-200 bg-white/95 px-2 py-1.5 backdrop-blur"
     >
       <ul className="flex items-center gap-1 text-xs">
-        {TOC_ITEMS.map((item) => (
+        {items.map((item) => (
           <li key={item.id}>
             <a
               href={`#${item.id}`}
@@ -3099,16 +3365,40 @@ function TableOfContents() {
 function ConclusionSection({ text }: { text?: string }) {
   if (!text) return null;
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Info className="h-5 w-5 text-ccm-red" />
-          Conclusion
+    <Card className="relative overflow-hidden border-slate-200">
+      {/* Soft CCM background tint */}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-ccm-red/[0.04] via-transparent to-ccm-gold/[0.04]" />
+      <div className="pointer-events-none absolute -left-16 -bottom-16 h-40 w-40 rounded-full bg-ccm-red/10 blur-3xl" />
+
+      <CardHeader className="relative">
+        <CardTitle className="flex items-center gap-2.5">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-ccm-ink to-ccm-red-dark text-ccm-gold shadow-md ring-1 ring-ccm-gold/30">
+            <Info className="h-4 w-4" />
+          </span>
+          <span>
+            Conclusion
+            <span className="ml-2 text-xs font-normal text-slate-500">
+              Verdict éditorial
+            </span>
+          </span>
         </CardTitle>
       </CardHeader>
-      <CardContent>
-        <p className="text-sm text-slate-700 leading-relaxed">{text}</p>
+
+      <CardContent className="relative">
+        {/* Quote-styled body with a red border accent */}
+        <blockquote className="relative rounded-lg border-l-4 border-ccm-red bg-white/70 py-3 pl-4 pr-3 backdrop-blur">
+          <span
+            aria-hidden
+            className="absolute -left-0.5 -top-1 select-none font-serif text-4xl leading-none text-ccm-red/30"
+          >
+            “
+          </span>
+          <p className="text-sm leading-relaxed text-slate-700">{text}</p>
+        </blockquote>
       </CardContent>
+
+      {/* Bottom accent line */}
+      <div className="h-1 bg-gradient-to-r from-ccm-gold via-ccm-red-light to-ccm-red opacity-70" />
     </Card>
   );
 }
@@ -3143,6 +3433,25 @@ export function ResultsPage() {
     ? rag.recommendations
     : [];
 
+  // Hide the "Recommandations et conclusion" section when it carries no
+  // actionable content — i.e. only the boilerplate "no significant risk"
+  // line plus the traceability instruction. In that case the box is
+  // pure noise.
+  const isTrivialDecisionSection = (() => {
+    const meaningful = recommendations
+      .map((r) => String(r).toLowerCase())
+      .filter(
+        (r) =>
+          !r.includes("aucune action corrective") &&
+          !r.includes("conserver une trace"),
+      );
+    const conclusionLower = String(rag.conclusion ?? "").toLowerCase();
+    const conclusionTrivial =
+      !conclusionLower.trim() ||
+      conclusionLower.includes("ne présente pas de risque significatif");
+    return meaningful.length === 0 && conclusionTrivial;
+  })();
+
   const handleDownload = () => {
     downloadPdfReport({
       ...analysis,
@@ -3160,8 +3469,6 @@ export function ResultsPage() {
 
       <StrictMatchBanner match={analysis.strict_match} />
 
-      <TableOfContents />
-
       {/* ---------- 1. Synthèse ---------- */}
       <section className="space-y-4">
         <SectionHeader
@@ -3175,75 +3482,74 @@ export function ResultsPage() {
       </section>
 
       {/* ---------- 3. Plagiat ---------- */}
-      <section className="space-y-4">
-        <SectionHeader
-          id="plagiat"
-          icon={Search}
-          title="Analyse plagiat"
-          subtitle="Comparaison sémantique du scénario avec le corpus indexé."
-        />
+      <section id="plagiat" className="scroll-mt-4">
         <PlagiarismSection plagiarism={plagiarism} />
       </section>
 
       {/* ---------- 4. Modération ---------- */}
-      <section className="space-y-4">
-        <SectionHeader
-          id="moderation"
-          icon={ShieldAlert}
-          title="Analyse modération"
-          subtitle="Détection de vulgarité et de contenu adulte."
-        />
+      <section id="moderation" className="scroll-mt-4">
         <ModerationSection analysis={analysis} />
       </section>
 
       {/* ---------- 5. Constantes nationales marocaines ---------- */}
-      <section className="space-y-4">
-        <SectionHeader
-          id="constantes-maroc"
-          icon={Landmark}
-          title="ثوابت الدولة المغربية — Constantes nationales"
-          subtitle="Conformité du scénario aux quatre constantes nationales (Islam modéré, Unité nationale, Monarchie constitutionnelle, Choix démocratique)."
-        />
+      <section id="constantes-maroc" className="scroll-mt-4">
         <MoroccanConstantsSection data={analysis.moroccan_constants} />
       </section>
 
-      {/* ---------- 6. Décision : recommandations + conclusion ---------- */}
-      <section className="space-y-4">
-        <SectionHeader
-          id="decision"
-          icon={ListChecks}
-          title="Recommandations et conclusion"
-          subtitle="Actions à prendre avant validation du scénario."
-        />
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <RecommendationsSection items={recommendations} />
-          <ConclusionSection text={rag.conclusion} />
-        </div>
-      </section>
-
       {/* ---------- 6. Rapport généré par l'IA ---------- */}
-      <section className="space-y-4">
-        <SectionHeader
-          id="rapport-ia"
-          icon={Sparkles}
-          title="Rapport généré par l'IA"
-          subtitle="Analyse rédigée des passages similaires et de leur portée éditoriale."
-        />
+      <section id="rapport-ia" className="scroll-mt-4 space-y-4">
         <AdvancedRAGSection
           analysis={analysis}
           scenarioId={scenarioId ?? analysis.scenario_id ?? null}
         />
         {rag.generated_report && (
-          <details className="rounded-md border border-slate-200 bg-white p-3">
-            <summary className="cursor-pointer text-sm font-medium text-slate-700">
-              Voir le rapport déterministe (template)
-            </summary>
-            <div className="mt-3">
-              <FormattedReport text={rag.generated_report} />
-            </div>
-          </details>
+          <Card className="relative overflow-hidden border-slate-200">
+            <div className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-ccm-red/10 blur-3xl" />
+            <CardContent className="relative flex flex-col items-start gap-3 pt-6 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-ccm-ink to-ccm-red-dark text-ccm-gold ring-1 ring-ccm-gold/30">
+                  <FileText className="h-5 w-5" />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-ccm-ink">
+                    Rapport déterministe complet
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Document PDF structuré, prêt à archiver ou à partager.
+                  </p>
+                </div>
+              </div>
+              <Button
+                onClick={handleDownload}
+                className="bg-gradient-to-br from-ccm-red-light via-ccm-red to-ccm-red-dark text-white shadow-md shadow-ccm-red/30 hover:from-ccm-red hover:to-ccm-red-dark"
+              >
+                <Download className="h-4 w-4" />
+                Télécharger la version PDF
+              </Button>
+            </CardContent>
+            <div className="h-1 bg-gradient-to-r from-ccm-red via-ccm-red-light to-ccm-gold opacity-70" />
+          </Card>
         )}
       </section>
+
+      {/* ---------- 7. Recommandations + 8. Conclusion ----------
+           Two distinct sections placed AFTER the RAG report so the
+           reader first absorbs the editorial analysis, then sees the
+           actionable list and the final verdict. Hidden when the
+           content is just the "no significant risk" boilerplate. */}
+      {!isTrivialDecisionSection && (
+        <>
+          <section id="recommandations" className="scroll-mt-4">
+            <RecommendationsSection items={recommendations} />
+          </section>
+
+          {rag.conclusion && (
+            <section id="conclusion" className="scroll-mt-4">
+              <ConclusionSection text={rag.conclusion} />
+            </section>
+          )}
+        </>
+      )}
     </div>
   );
 }

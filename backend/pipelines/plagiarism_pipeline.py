@@ -133,6 +133,17 @@ class PlagiarismPipeline:
             cleaned_text=document.cleaned_text,
             warnings=warnings,
         )
+        # The strict-similarity verdict and the plagiarism exact-duplicate
+        # signal must stay in sync: when the plagiarism stage detected an
+        # exact duplicate (file_hash or text_hash match) but the strict
+        # verdict still reads "different" — typically because the legacy
+        # history doc doesn't expose its hashes at the top level — we
+        # override the verdict so the report header doesn't contradict
+        # the plagiarism section.
+        strict_match = self._reconcile_strict_with_duplicate(
+            strict_match=strict_match,
+            plagiarism_result=plagiarism_result,
+        )
         return PlagiarismOutcome(
             plagiarism_result=plagiarism_result,
             strict_match=strict_match,
@@ -872,6 +883,58 @@ class PlagiarismPipeline:
                 },
                 False,
             )
+
+    @staticmethod
+    def _reconcile_strict_with_duplicate(
+        *,
+        strict_match: dict[str, Any],
+        plagiarism_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not isinstance(strict_match, dict):
+            return strict_match
+        if not bool(plagiarism_result.get("exact_duplicate")):
+            return strict_match
+        if str(strict_match.get("verdict")) != "different":
+            return strict_match
+
+        duplicate_analyses = plagiarism_result.get("duplicate_analyses") or []
+        first = duplicate_analyses[0] if duplicate_analyses else {}
+        matched = None
+        if isinstance(first, dict) and first:
+            matched = {
+                "scenario_id": str(first.get("scenario_id") or ""),
+                "original_filename": first.get("original_filename"),
+                "stored_filename": first.get("stored_filename")
+                or first.get("filename"),
+                "analyzed_at": first.get("analyzed_at")
+                or first.get("analysis_timestamp"),
+                "risk_level": first.get("risk_level"),
+                "file_hash": first.get("file_hash"),
+                "text_hash": first.get("text_hash"),
+                "similarity_score": 1.0,
+                "score_percent": 100.0,
+                "match_type": "exact_duplicate",
+            }
+        count_text = (
+            f"{len(duplicate_analyses)} analyse(s) antérieure(s)"
+            if duplicate_analyses
+            else "une analyse antérieure"
+        )
+        strict_match.update(
+            {
+                "verdict": "identical",
+                "score": 1.0,
+                "score_percent": 100.0,
+                "match_type": "exact_duplicate",
+                "is_renewal_candidate": True,
+                "reason": (
+                    "Doublon exact déjà présent dans l'historique "
+                    f"({count_text})."
+                ),
+                "matched_analysis": matched,
+            }
+        )
+        return strict_match
 
     def _compute_strict_match(
         self,
