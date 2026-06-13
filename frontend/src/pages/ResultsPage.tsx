@@ -24,6 +24,7 @@ import {
   Moon,
   Search,
   ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Target,
   Vote,
@@ -35,7 +36,13 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/table";
 import { useAnalysisStore } from "@/store/analysis";
-import { downloadPdfReport } from "@/lib/pdf";
+// jspdf + jspdf-autotable + html2canvas weigh ~350 KB combined. We import
+// them lazily so users who never download a PDF report don't pay that cost
+// on page load.
+async function downloadPdfReport(...args: Parameters<typeof import("@/lib/pdf").downloadPdfReport>) {
+  const mod = await import("@/lib/pdf");
+  return mod.downloadPdfReport(...args);
+}
 import { generateAdvancedReport, type AdvancedReport } from "@/lib/api";
 import { cn, formatRiskLabel, formatScore, riskColor } from "@/lib/utils";
 import type {
@@ -743,7 +750,7 @@ function StrictMatchBanner({ match }: { match: StrictMatch | undefined }) {
               return (
                 <li key={i}>
                   <span className="font-medium">« {name} »</span> —{" "}
-                  {e.score_percent.toFixed(2)}%
+                  {Math.round(e.score_percent)}%
                 </li>
               );
             })}
@@ -1452,7 +1459,7 @@ function ScoreBar({ value }: { value: number }) {
         />
       </div>
       <span className="font-mono font-semibold text-sm tabular-nums text-slate-800">
-        {pct.toFixed(2)}%
+        {Math.round(pct)}%
       </span>
       <Badge
         className={cn(
@@ -1843,7 +1850,7 @@ function PlagiarismSection({ plagiarism }: { plagiarism: Plagiarism }) {
           </CardTitle>
         </CardHeader>
         <CardContent className="relative">
-          <Alert variant="info">
+          <Alert variant="success">
             Aucun passage similaire significatif n'a été détecté.
           </Alert>
         </CardContent>
@@ -1916,7 +1923,7 @@ function PlagiarismSection({ plagiarism }: { plagiarism: Plagiarism }) {
             </span>
           </div>
         ) : (
-          <Alert variant="info">
+          <Alert variant="success">
             Aucun passage similaire partiel significatif n'a été détecté.
           </Alert>
         )}
@@ -1976,17 +1983,68 @@ function ModerationSection({ analysis }: { analysis: Analysis }) {
   const profPct = profanityScore <= 1 ? profanityScore * 100 : profanityScore;
   const adultPct = adultScore <= 1 ? adultScore * 100 : adultScore;
 
+  // The headline visual of the moderation card adapts to the worst of the
+  // two scores. A low/clean moderation reads as green, a borderline one as
+  // amber, a flagged one as the CCM red. Without this the icon and halos
+  // stayed red even on perfectly clean scenarios.
+  const modPct = Math.max(profPct, adultPct);
+  const modTone: "low" | "medium" | "high" =
+    modPct >= 60 ? "high" : modPct >= 20 ? "medium" : "low";
+  const modVisual = {
+    low: {
+      glowA: "bg-emerald-300/15",
+      glowB: "bg-emerald-200/15",
+      iconWrap:
+        "bg-gradient-to-br from-emerald-400 via-emerald-500 to-emerald-600 shadow-emerald-500/30",
+      ring: "ring-emerald-300/40",
+    },
+    medium: {
+      glowA: "bg-amber-300/20",
+      glowB: "bg-amber-200/15",
+      iconWrap:
+        "bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 shadow-amber-500/30",
+      ring: "ring-amber-300/40",
+    },
+    high: {
+      glowA: "bg-ccm-red/10",
+      glowB: "bg-rose-300/15",
+      iconWrap:
+        "bg-gradient-to-br from-ccm-red-light via-ccm-red to-ccm-red-dark shadow-ccm-red/30",
+      ring: "ring-ccm-gold/30",
+    },
+  }[modTone];
+
   return (
     <Card className="relative overflow-hidden border-slate-200">
-      {/* CCM-aligned glows */}
-      <div className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-ccm-red/10 blur-3xl" />
-      <div className="pointer-events-none absolute -left-20 -bottom-20 h-40 w-40 rounded-full bg-rose-300/15 blur-3xl" />
+      {/* Tone-adaptive ambient glows */}
+      <div
+        className={cn(
+          "pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full blur-3xl transition-colors",
+          modVisual.glowA
+        )}
+      />
+      <div
+        className={cn(
+          "pointer-events-none absolute -left-20 -bottom-20 h-40 w-40 rounded-full blur-3xl transition-colors",
+          modVisual.glowB
+        )}
+      />
 
       <CardHeader className="relative">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <CardTitle className="flex items-center gap-2.5">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-ccm-red-light via-ccm-red to-ccm-red-dark text-white shadow-md shadow-ccm-red/30 ring-1 ring-ccm-gold/30">
-              <ShieldAlert className="h-4 w-4" />
+            <span
+              className={cn(
+                "inline-flex h-9 w-9 items-center justify-center rounded-lg text-white shadow-md ring-1 transition-colors",
+                modVisual.iconWrap,
+                modVisual.ring
+              )}
+            >
+              {modTone === "low" ? (
+                <ShieldCheck className="h-4 w-4" />
+              ) : (
+                <ShieldAlert className="h-4 w-4" />
+              )}
             </span>
             <span>
               Analyse modération
@@ -2032,21 +2090,23 @@ function ModerationSection({ analysis }: { analysis: Analysis }) {
         </div>
       </CardHeader>
       <CardContent className="relative space-y-6">
-        {/* Vulgarité — Résumé groupé */}
+        {/* Vulgarité — Résumé groupé. The "Résumé des mots détectés"
+            heading only makes sense when there *is* something to list;
+            otherwise we just show the success notice on its own. */}
         <div>
-          <div className="mb-2 flex items-center gap-2 border-l-4 border-ccm-red/40 pl-3">
-            <h3 className="text-sm font-semibold text-ccm-ink">
-              Résumé des mots détectés
-            </h3>
-            {grouped.length > 0 && (
+          {grouped.length > 0 && (
+            <div className="mb-2 flex items-center gap-2 border-l-4 border-ccm-red/40 pl-3">
+              <h3 className="text-sm font-semibold text-ccm-ink">
+                Résumé des mots détectés
+              </h3>
               <span className="text-xs text-slate-500">
                 {grouped.length} mot{grouped.length > 1 ? "s" : ""} unique
                 {grouped.length > 1 ? "s" : ""}
               </span>
-            )}
-          </div>
+            </div>
+          )}
           {grouped.length === 0 ? (
-            <Alert variant="info">
+            <Alert variant="success">
               Aucune vulgarité significative n'a été détectée.
             </Alert>
           ) : (
@@ -2165,7 +2225,16 @@ function ModerationSection({ analysis }: { analysis: Analysis }) {
           </div>
         )}
       </CardContent>
-      <div className="h-1 bg-gradient-to-r from-ccm-red via-rose-500 to-ccm-gold opacity-70" />
+      <div
+        className={cn(
+          "h-1 bg-gradient-to-r opacity-70 transition-colors",
+          modTone === "low" &&
+            "from-emerald-400 via-teal-500 to-emerald-500",
+          modTone === "medium" &&
+            "from-amber-400 via-amber-500 to-orange-500",
+          modTone === "high" && "from-ccm-red via-rose-500 to-ccm-gold"
+        )}
+      />
     </Card>
   );
 }
@@ -2857,7 +2926,7 @@ function AdvancedRAGSection({
                 Risque : {formatRiskLabel(report.context.risk_level)}
               </Badge>
               <Badge className="bg-slate-100 text-slate-600 border-slate-200">
-                Score : {report.context.similarity_score_pct.toFixed(2)}%
+                Score : {Math.round(report.context.similarity_score_pct)}%
               </Badge>
               <span className="text-slate-400">
                 généré le{" "}
@@ -2905,7 +2974,7 @@ function AdvancedRAGSection({
                     className="rounded border border-slate-200 p-2 space-y-1"
                   >
                     <p className="font-mono text-slate-600">
-                      #{p.rank} · {p.score_pct.toFixed(2)}% ·{" "}
+                      #{p.rank} · {Math.round(p.score_pct)}% ·{" "}
                       {p.source_filename} · {p.current_position} ↔{" "}
                       {p.source_position}
                       {p.grouped_copies > 1 && ` · ×${p.grouped_copies}`}
@@ -3165,15 +3234,15 @@ function MoroccanConstantsSection({
             <div className="flex items-center gap-3">
               <Landmark className="h-6 w-6 text-ccm-ink" />
               <div>
+                <p className="text-xl font-bold text-ccm-ink">
+                  Constantes nationales — conformité
+                </p>
                 <p
-                  className="text-xl font-bold text-ccm-ink"
+                  className="text-sm text-slate-500"
                   dir="rtl"
                   lang="ar"
                 >
                   ثوابت الدولة المغربية
-                </p>
-                <p className="text-xs uppercase tracking-wider text-slate-500">
-                  Constantes nationales — conformité
                 </p>
               </div>
             </div>
@@ -3755,13 +3824,7 @@ export function ResultsPage() {
       <StrictMatchBanner match={analysis.strict_match} />
 
       {/* ---------- 1. Synthèse ---------- */}
-      <section className="space-y-4">
-        <SectionHeader
-          id="synthese"
-          icon={ClipboardCheck}
-          title="Synthèse"
-          subtitle="Vue d'ensemble du scénario et niveau de risque global."
-        />
+      <section id="synthese" className="space-y-4 scroll-mt-4">
         <StatusCards analysis={analysis} />
         <SummarySection analysis={analysis} />
       </section>

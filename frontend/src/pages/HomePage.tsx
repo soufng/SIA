@@ -173,7 +173,7 @@ function Kpi({
 
   const display =
     format === "percent"
-      ? `${animated.toFixed(2)}%`
+      ? `${Math.round(animated)}%`
       : Math.round(animated).toLocaleString("fr-FR");
 
   return (

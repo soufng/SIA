@@ -112,6 +112,29 @@ def _configure_auth(monkeypatch: pytest.MonkeyPatch, *, otp_enabled: bool) -> No
         config_module.settings, "AUTH_ENABLED", True, raising=False
     )
 
+    # The OTP tests rely on the env-admin fallback path inside AuthService
+    # (see ``_resolve_user``): when the users collection is empty, the
+    # credentials configured above are accepted. Force the repository to
+    # report an empty DB so the test does not depend on real Mongo state.
+    from backend.repositories.users_repository import UsersRepository
+
+    monkeypatch.setattr(
+        UsersRepository, "get_for_auth", lambda self, username: None
+    )
+    monkeypatch.setattr(UsersRepository, "count", lambda self: 0)
+    monkeypatch.setattr(
+        UsersRepository,
+        "create_user",
+        lambda self, *, username, password_hash, role: {
+            "user_id": "env-admin",
+            "username": username,
+            "role": role,
+            "created_at": None,
+            "last_login_at": None,
+            "disabled": False,
+        },
+    )
+
 
 def test_login_without_otp_when_disabled(
     monkeypatch: pytest.MonkeyPatch,

@@ -188,7 +188,7 @@ function ScoreTile({ label, value, icon: Icon, thresholds }: ScoreTileProps) {
             c.text,
           )}
         >
-          {animated.toFixed(2)}
+          {Math.round(animated)}
         </span>
         <span className="text-xs font-medium text-slate-400">%</span>
       </div>

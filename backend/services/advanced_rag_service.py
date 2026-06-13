@@ -260,19 +260,17 @@ class AdvancedRAGService:
 
     @staticmethod
     def _should_use_deterministic_report(context: RAGContext) -> bool:
-        """Avoid slow/fragile LLM calls when there is no retrieval context.
+        """Short-circuit the LLM only when no real provider is configured.
 
-        If the only actionable signals are deterministic detector outputs
-        (exact duplicate or PrincipesMarocPipeline flags), the LLM would not
-        add new evidence and must not create risk. The deterministic narrative
-        is faster and keeps the report tied to the existing flags.
+        Historically this method also skipped the LLM for exact duplicates
+        and for "Moroccan flags + zero plagiarism passages" — the reasoning
+        being that the LLM could not add new evidence. We now want the LLM
+        to act as a contextual *second reader* even in those cases (explain
+        the Moroccan flags, suggest reformulations), so the short-circuit
+        is intentionally removed. The mock-provider check below ensures we
+        still avoid a useless LLM round-trip when no real provider is set.
         """
-        moroccan_flags = (
-            (context.moroccan_constants_summary or {}).get("flags") or []
-        )
-        return context.exact_duplicate or (
-            len(context.passages) == 0 and bool(moroccan_flags)
-        )
+        return False
 
     # ---------- Context building ----------
 

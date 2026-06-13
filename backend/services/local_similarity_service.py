@@ -103,7 +103,7 @@ class LocalSimilarityService:
         return {
             "scenario_id": scenario_id,
             "score": round(max_score, 4),
-            "score_percent": round(max_score * 100, 2),
+            "score_percent": int(round(max_score * 100)),
             "risk": risk,
             "duplicate": exact_duplicate,
             "exact_duplicate": exact_duplicate,

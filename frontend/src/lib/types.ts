@@ -210,6 +210,40 @@ export interface MoroccanConstants {
     Record<string, number>;
 }
 
+export type LlmContextualCategory =
+  | "principes_marocains"
+  | "vie_privee"
+  | "monarchie"
+  | "religion"
+  | "sexualite"
+  | "violence"
+  | "politique"
+  | "ambiguite";
+
+export type LlmContextualRisk = "LOW" | "MEDIUM" | "HIGH" | "VERY_HIGH";
+
+export interface LlmContextualAlert {
+  category: LlmContextualCategory | string;
+  risk: LlmContextualRisk | string;
+  exact_quote: string;
+  page?: number | null;
+  chunk_id?: string;
+  chunk_index?: number | null;
+  reason?: string;
+  suggested_rewrite?: string;
+}
+
+export interface LlmContextualAlerts {
+  enabled: boolean;
+  alerts: LlmContextualAlert[];
+  summary?: string;
+  model?: string;
+  provider?: string;
+  fallback_used?: boolean;
+  rejected_count?: number;
+  error?: string | null;
+}
+
 export interface Analysis {
   scenario_id?: string;
   analysis_timestamp?: string;
@@ -220,6 +254,7 @@ export interface Analysis {
   strict_match?: StrictMatch;
   rag_report?: RagReport;
   moroccan_constants?: MoroccanConstants;
+  llm_contextual_alerts?: LlmContextualAlerts;
   status?: string;
   warnings?: string[];
 }
@@ -245,6 +280,7 @@ export interface HistoryItem {
   adult_content?: AdultContent;
   moroccan_constants?: MoroccanConstants;
   rag_report?: RagReport;
+  llm_contextual_alerts?: LlmContextualAlerts;
 }
 
 // ---------- Admin : users & audit log ----------
@@ -280,7 +316,12 @@ export interface Statistics {
   average_similarity_score?: number;
   average_profanity_score?: number;
   average_adult_content_score?: number;
-  risk_counts?: { low?: number; medium?: number; high?: number };
+  risk_counts?: {
+    low?: number;
+    medium?: number;
+    high?: number;
+    very_high?: number;
+  };
   top_similar_scenarios?: Array<Record<string, unknown>>;
   analyses_by_date?: Array<{ date: string; count: number }>;
   risky_analyses?: Array<Record<string, unknown>>;

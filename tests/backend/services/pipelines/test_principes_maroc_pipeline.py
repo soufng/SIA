@@ -42,11 +42,15 @@ def _split(text: str, n: int = 1) -> list[str]:
 
 
 def test_neutral_mentions_stay_low_risk(pipeline: PrincipesMarocPipeline) -> None:
-    """A descriptive paragraph mentioning Maroc/Islam/King/Sahara/Constitution
-    without any insult or violence keyword must not raise a flag."""
+    """Generic institutional vocabulary (Maroc, Islam, Sahara, Constitution)
+    without any royal-family persona must not raise a flag.
+
+    Royal personas are auto-flagged regardless of context (see the dedicated
+    persona test below), so they are intentionally absent here.
+    """
     text = (
-        "Le Maroc est un royaume du Maghreb. Le roi Mohammed VI préside les "
-        "institutions. La majorité des Marocains pratiquent l'islam. "
+        "Le Maroc est un royaume du Maghreb. "
+        "La majorité des Marocains pratiquent l'islam. "
         "La constitution garantit la diversité et la démocratie. "
         "Le Sahara est une région importante du sud du pays."
     )
@@ -54,6 +58,29 @@ def test_neutral_mentions_stay_low_risk(pipeline: PrincipesMarocPipeline) -> Non
     assert result["risk_level"] == LEVEL_FAIBLE
     assert result["score"] < 0.25
     assert result["flags"] == []
+
+
+def test_royal_persona_mention_is_auto_flagged(
+    pipeline: PrincipesMarocPipeline,
+) -> None:
+    """Any nominative mention of a royal-family member (past or present)
+    must surface for manual review — even when the surrounding text is
+    descriptive or laudatory."""
+    cases = [
+        "Mohammed 6 ouvre le Festival de Marrakech.",
+        "Le roi Mohammed VI a présenté sa nouvelle réforme.",
+        "Feu le roi Hassan II évoquait souvent ce sujet.",
+        "Le prince héritier Moulay El Hassan étudie à Rabat.",
+        "Lalla Salma a fondé une association.",
+    ]
+    for text in cases:
+        result = pipeline.analyze(text=text, chunks=_split(text))
+        assert result["risk_level"] != LEVEL_FAIBLE, (
+            f"Expected a flag for royal persona mention: {text!r}"
+        )
+        assert any(
+            flag["category"] == "monarchy" for flag in result["flags"]
+        ), f"Expected monarchy flag for: {text!r}"
 
 
 def test_history_lesson_is_low_risk(pipeline: PrincipesMarocPipeline) -> None:

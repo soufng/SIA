@@ -9,7 +9,18 @@ export function formatScore(value: unknown, suffix = ""): string {
   const n = Number(value);
   if (!Number.isFinite(n)) return `0${suffix}`;
   const scaled = n <= 1 && suffix === "%" ? n * 100 : n;
-  return `${scaled.toFixed(2)}${suffix}`;
+  // Percentages are always rounded integers (0..100). Other suffixes (none,
+  // raw scores) keep their natural precision but rounded to an integer too
+  // so the UI never shows ``44.51%`` or ``85.07%`` for an estimate.
+  if (suffix === "%") {
+    const clamped = Math.min(100, Math.max(0, Math.round(scaled)));
+    return `${clamped}${suffix}`;
+  }
+  return `${Math.round(scaled)}${suffix}`;
+}
+
+export function formatPercent(value: unknown): string {
+  return formatScore(value, "%");
 }
 
 export function formatDate(value: unknown): string {
@@ -27,8 +38,14 @@ export function formatDate(value: unknown): string {
 }
 
 export function riskColor(level: string | undefined): string {
-  const k = String(level || "").toLowerCase();
-  if (k === "tres_eleve" || k === "très élevé" || k === "tres eleve")
+  const k = String(level || "").toLowerCase().trim();
+  if (
+    k === "very_high" ||
+    k === "veryhigh" ||
+    k === "tres_eleve" ||
+    k === "très élevé" ||
+    k === "tres eleve"
+  )
     return "bg-red-200 text-red-900 border-red-300";
   if (k === "high" || k === "élevé" || k === "eleve")
     return "bg-red-100 text-red-700 border-red-200";
@@ -49,6 +66,8 @@ export function riskColor(level: string | undefined): string {
 export function formatRiskLabel(level: string | undefined): string {
   const k = String(level || "").toLowerCase().trim();
   switch (k) {
+    case "very_high":
+    case "veryhigh":
     case "tres_eleve":
     case "tres eleve":
     case "très élevé":

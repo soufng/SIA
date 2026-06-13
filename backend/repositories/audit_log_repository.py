@@ -136,7 +136,9 @@ class AuditLogRepository:
     def _get_database(self) -> Database:
         if self.database is not None:
             return self.database
-        return get_database(self.mongodb_url, self.database_name)
+        # ``get_database`` reads from ``settings`` — instance-level URL /
+        # name fields are only used by tests that inject ``database`` directly.
+        return get_database()
 
 
 def _utcnow_iso() -> str:
