@@ -28,11 +28,6 @@ from backend.services.pipelines.principes_maroc_pipeline import (
 )
 from backend.services.chunking_service import ChunkingService
 from backend.services.embedding_service import EmbeddingService
-from backend.services.llm_contextual_review_service import (
-    LLMContextualReviewService,
-    report_risk_for_alert,
-    should_escalate_global_risk,
-)
 from backend.services.local_similarity_service import LocalSimilarityService
 from backend.services.pdf_service import PDFService
 from backend.services.plagiarism_service import PlagiarismService
@@ -66,7 +61,6 @@ class AnalysisService:
         plagiarism_pipeline: PlagiarismPipeline | None = None,
         moderation_pipeline: ModerationPipeline | None = None,
         principes_maroc_pipeline: PrincipesMarocPipeline | None = None,
-        llm_contextual_review_service: LLMContextualReviewService | None = None,
     ) -> None:
         self.pdf_service = pdf_service or PDFService()
         self.text_cleaning_service = text_cleaning_service or TextCleaningService()
@@ -107,9 +101,6 @@ class AnalysisService:
         self._principes_maroc_pipeline = (
             principes_maroc_pipeline or PrincipesMarocPipeline()
         )
-        # Optional LLM second-reader. Built lazily; only invoked when the
-        # corresponding feature flag is enabled.
-        self._llm_contextual_review_service = llm_contextual_review_service
 
     # ---------- Lazy services ----------
 
@@ -162,12 +153,6 @@ class AnalysisService:
                 vector_service=self.vector_service,
             )
         return self._plagiarism_pipeline
-
-    @property
-    def llm_contextual_review_service(self) -> LLMContextualReviewService:
-        if self._llm_contextual_review_service is None:
-            self._llm_contextual_review_service = LLMContextualReviewService()
-        return self._llm_contextual_review_service
 
     @property
     def moderation_pipeline(self) -> ModerationPipeline:
@@ -249,26 +234,6 @@ class AnalysisService:
                     rag_report["risk_level"] = escalated
                     rag_report["risk_level_floored_by"] = "moroccan_constants"
 
-            # Optional LLM second-reader pass. Additive only: never
-            # overrides any deterministic field, only adds the
-            # ``llm_contextual_alerts`` block and may floor the report
-            # risk level when a HIGH/VERY_HIGH alert touches a
-            # particularly sensitive category.
-            llm_contextual = self._run_llm_contextual_review(
-                document=document,
-                pipeline_results={
-                    "plagiarism": plagiarism_outcome.plagiarism_result,
-                    "profanity": moderation.profanity_result,
-                    "adult_content": moderation.adult_content_result,
-                    "moroccan_constants": moroccan_constants,
-                },
-            )
-            if llm_contextual.get("enabled") and isinstance(rag_report, dict):
-                self._floor_report_risk_with_llm_alerts(
-                    rag_report=rag_report,
-                    llm_alerts=llm_contextual.get("alerts") or [],
-                )
-
             self.plagiarism_pipeline.store_vectors(
                 document=document,
                 vector_available=plagiarism_outcome.vector_available,
@@ -300,7 +265,6 @@ class AnalysisService:
                 "file_hash": document.file_hash,
                 "text_hash": document.text_hash,
                 "document_chunks": advanced_rag_chunks,
-                "llm_contextual_alerts": llm_contextual,
             }
 
             logger.info(
@@ -318,77 +282,3 @@ class AnalysisService:
                 "Scenario analysis failed for scenario_id=%s.", scenario_id
             )
             raise RuntimeError("Scenario analysis failed") from exc
-
-    # ---------- LLM contextual review helpers ----------
-
-    _RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "very_high": 3}
-
-    def _run_llm_contextual_review(
-        self,
-        document: DocumentContext,
-        pipeline_results: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Execute the optional LLM second-reader. Never raises."""
-        if not settings.LLM_CONTEXTUAL_REVIEW_ENABLED:
-            return {
-                "enabled": False,
-                "alerts": [],
-                "summary": "",
-                "model": "",
-                "provider": "",
-                "fallback_used": False,
-                "rejected_count": 0,
-                "error": None,
-            }
-        try:
-            metadata = {
-                "scenario_id": document.scenario_id,
-                "original_filename": document.original_filename,
-                "chunks_count": len(document.chunks),
-            }
-            result = self.llm_contextual_review_service.review(
-                scenario_metadata=metadata,
-                scenario_chunks=document.chunk_metadata or [],
-                pipeline_results=pipeline_results,
-            )
-            return result.to_dict()
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.exception(
-                "LLM contextual review unexpectedly failed (scenario=%s).",
-                document.scenario_id,
-            )
-            return {
-                "enabled": True,
-                "alerts": [],
-                "summary": "",
-                "model": "",
-                "provider": "",
-                "fallback_used": True,
-                "rejected_count": 0,
-                "error": str(exc),
-            }
-
-    @classmethod
-    def _floor_report_risk_with_llm_alerts(
-        cls,
-        rag_report: dict[str, Any],
-        llm_alerts: list[dict[str, Any]],
-    ) -> None:
-        """Bump rag_report risk_level if a sensitive LLM alert demands it."""
-        if not llm_alerts:
-            return
-        current = str(rag_report.get("risk_level") or "low")
-        current_rank = cls._RISK_ORDER.get(current, 0)
-        bumped = current
-        bumped_rank = current_rank
-        for alert in llm_alerts:
-            if not should_escalate_global_risk(alert):
-                continue
-            candidate = report_risk_for_alert(alert)
-            rank = cls._RISK_ORDER.get(candidate, 0)
-            if rank > bumped_rank:
-                bumped = candidate
-                bumped_rank = rank
-        if bumped != current:
-            rag_report["risk_level"] = bumped
-            rag_report["risk_level_floored_by"] = "llm_contextual_alerts"

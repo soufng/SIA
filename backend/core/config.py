@@ -120,34 +120,6 @@ class Settings(BaseSettings):
         default=20, validation_alias="SIA_RAG_RERANK_POOL_SIZE"
     )
 
-    # ---- LLM contextual review (optional second-reader layer) ----
-    # Additive layer over the deterministic pipelines. When enabled, a small
-    # subset of chunks (royal mentions, sensitive lexicon, neighbours of
-    # already-flagged passages, edges of the screenplay) is sent to the LLM
-    # for a contextual second read. Validated alerts are merged into the
-    # final result under ``llm_contextual_alerts`` — existing fields stay
-    # unchanged. Off by default to avoid extra LLM cost.
-    LLM_CONTEXTUAL_REVIEW_ENABLED: bool = Field(
-        default=False,
-        validation_alias="LLM_CONTEXTUAL_REVIEW_ENABLED",
-    )
-    LLM_CONTEXTUAL_MAX_CHUNKS: int = Field(
-        default=10,
-        validation_alias="MAX_LLM_CONTEXT_CHUNKS",
-    )
-    LLM_CONTEXTUAL_MAX_CHARS_PER_CHUNK: int = Field(
-        default=2000,
-        validation_alias="MAX_CHARS_PER_CHUNK",
-    )
-    LLM_CONTEXTUAL_MAX_TOTAL_CHARS: int = Field(
-        default=12000,
-        validation_alias="MAX_TOTAL_LLM_CONTEXT_CHARS",
-    )
-    LLM_ALERTS_MAX: int = Field(
-        default=8,
-        validation_alias="LLM_ALERTS_MAX",
-    )
-
     # ---- Uploads ----
     # Taille maximale d'un PDF accepté par /uploads/analyze (Mo). 0 désactive.
     UPLOAD_MAX_MB: int = Field(default=20, validation_alias="SIA_UPLOAD_MAX_MB")
