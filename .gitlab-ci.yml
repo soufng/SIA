@@ -187,3 +187,44 @@ deploy:latest:
     - docker push "$IMAGE_LATEST"
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
+
+# ---------------------------------------------------------------------------
+# GitLab Pages — publication du frontend statique.
+#
+# Le job DOIT s'appeler ``pages`` et déposer un artefact dans le dossier
+# ``public/`` pour que GitLab le publie sur https://soufng.gitlab.io/SIA/.
+# Le ``--base=/SIA/`` corrige les chemins absolus injectés par Vite
+# (sinon les assets cherchent ``/assets/...`` à la racine, qui n'existe pas
+# sur un Pages projet).
+#
+# Le frontend déployé tente d'appeler ``http://127.0.0.1:8000`` par défaut
+# (cf. ``frontend/src/lib/api.ts``). Pour cibler un backend public, override
+# au build via la variable CI/CD ``VITE_API_BASE_URL``
+# (Settings → CI/CD → Variables).
+# ---------------------------------------------------------------------------
+
+pages:
+  stage: deploy
+  image: node:20-alpine
+  needs:
+    - job: frontend:test
+      artifacts: false
+  cache:
+    key:
+      files:
+        - frontend/package-lock.json
+    paths:
+      - .cache/npm
+      - frontend/node_modules
+  before_script:
+    - cd frontend
+    - npm ci --cache "$NPM_CONFIG_CACHE"
+  script:
+    - npm run build -- --base=/SIA/
+    - mv dist ../public
+  artifacts:
+    paths:
+      - public
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
