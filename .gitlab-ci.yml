@@ -189,6 +189,45 @@ deploy:latest:
     - if: $CI_COMMIT_BRANCH == "main"
 
 # ---------------------------------------------------------------------------
+# Stage : deploy — CD vers Docker Desktop local.
+#
+# Exécuté par un runner self-hosted (executor: shell) tagué ``local`` qui
+# tourne sur la machine cible. Le runner a accès au Docker Desktop de
+# l'hôte → il pull la dernière image et relance la stack.
+#
+# Pré-requis machine :
+#   - gitlab-runner installé et enregistré (tag = local, executor = shell)
+#   - Docker Desktop démarré
+#   - Le repo clôné quelque part (le runner clône dans son workspace, donc
+#     pas besoin d'une copie manuelle)
+#   - Stack ``db`` (Mongo/Qdrant) déjà up — ce job ne touche que le backend
+#     et le frontend, les DBs sont gérées séparément
+# ---------------------------------------------------------------------------
+
+deploy:local:
+  stage: deploy
+  needs:
+    - job: build:image
+  tags:
+    - local
+  environment:
+    name: local-docker-desktop
+    url: http://localhost:8080
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    # Pull la dernière image buildée par build:image (tag = sha court).
+    - docker pull "$IMAGE_TAG"
+    # On retag en sia-backend:local pour que docker-compose.full.yml la trouve.
+    - docker tag "$IMAGE_TAG" sia-backend:local
+    # Relance la stack — ``up -d`` recrée seulement les services dont l'image
+    # a changé. Le frontend nginx et son volume dist/ ne bougent pas.
+    - docker compose -f docker-compose.full.yml up -d
+    - docker compose -f docker-compose.full.yml ps
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+
+# ---------------------------------------------------------------------------
 # GitLab Pages — publication du frontend statique.
 #
 # Le job DOIT s'appeler ``pages`` et déposer un artefact dans le dossier
