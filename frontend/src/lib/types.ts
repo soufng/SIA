@@ -178,6 +178,8 @@ export interface MoroccanFlag {
   /** Risk vocab. May be the French scale or the legacy English one. */
   severity: string;
   chunk_index?: number | null;
+  /** Numéro de page du PDF (attaché côté backend via chunk_metadata). */
+  page_number?: number | null;
   evidence?: string;
   explanation?: string;
 }
@@ -192,6 +194,8 @@ export interface MoroccanMention {
   category: MoroccanCategoryKey | string;
   subject?: string;
   chunk_index?: number | null;
+  /** Numéro de page du PDF (attaché côté backend via chunk_metadata). */
+  page_number?: number | null;
   evidence?: string;
   /** Severity bucket when this mention is also flagged, ``null`` otherwise. */
   flagged_severity?: string | null;
