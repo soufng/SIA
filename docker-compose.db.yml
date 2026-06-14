@@ -1,0 +1,48 @@
+# Stack "db" — MongoDB + Qdrant
+#
+# Remplace l'ancienne stack ``spm`` dans Docker Desktop. Réutilise les
+# volumes existants ``spm_mongodb_data`` et ``spm_qdrant_data`` (déclarés
+# external) pour préserver les données.
+#
+# Le backend SIA (docker-compose.full.yml) les joint via
+# ``host.docker.internal:27017`` / ``:6333`` — ports publiés ici.
+#
+# Démarrage :
+#   docker compose -f docker-compose.db.yml up -d
+
+name: db
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: db_mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: db_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  # Volumes existants — créés à l'origine par la stack ``spm``. On les
+  # reprend tels quels pour ne pas perdre les données.
+  mongodb_data:
+    external: true
+    name: spm_mongodb_data
+  qdrant_data:
+    external: true
+    name: spm_qdrant_data

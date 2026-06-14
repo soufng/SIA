@@ -2345,10 +2345,11 @@ function AdvancedRAGSection({
                 </div>
 
                 <p className="text-xs text-slate-600">
-                  Le modèle local (Ollama llama3.2:3b sur CPU) traite ton
-                  rapport. Compte environ <strong>90 à 150 secondes</strong>
-                  {" "}selon la taille du contexte. La barre est une estimation,
-                  pas une mesure exacte — ne ferme pas l'onglet.
+                  Le modèle local traite ton rapport. Le temps de traitement
+                  dépend de la <strong>taille du fichier</strong> et du{" "}
+                  <strong>matériel utilisé</strong> (CPU/GPU, RAM). La barre
+                  est une estimation, pas une mesure exacte — ne ferme pas
+                  l'onglet.
                 </p>
               </div>
             </div>
