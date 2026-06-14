@@ -164,7 +164,7 @@ function BilingualBlock({
         unicodeBidi: "plaintext",
         wordBreak: "break-word",
         fontFamily:
-          "'Noto Sans Arabic', 'Segoe UI', system-ui, -apple-system, sans-serif",
+          "'IBM Plex Sans Arabic', 'Segoe UI', system-ui, -apple-system, sans-serif",
       }}
       dir="auto"
     >
@@ -3041,12 +3041,17 @@ function MoroccanMentionRow({ mention }: { mention: MoroccanMention }) {
               « {mention.subject} »
             </span>
           )}
-          {mention.chunk_index !== null &&
-            mention.chunk_index !== undefined && (
-              <Badge className="border-slate-200 bg-slate-100 text-slate-600 text-[10px]">
-                Segment #{mention.chunk_index}
-              </Badge>
-            )}
+          {mention.page_number !== null &&
+          mention.page_number !== undefined ? (
+            <Badge className="border-slate-200 bg-slate-100 text-slate-700 text-[10px]">
+              Page {mention.page_number}
+            </Badge>
+          ) : mention.chunk_index !== null &&
+            mention.chunk_index !== undefined ? (
+            <Badge className="border-slate-200 bg-slate-100 text-slate-600 text-[10px]">
+              Segment #{mention.chunk_index}
+            </Badge>
+          ) : null}
           {isFlagged ? (
             <Badge
               className={cn(
@@ -3117,11 +3122,15 @@ function MoroccanFlagRow({ flag }: { flag: MoroccanFlag }) {
             <Badge className={severityBadgeClass(flag.severity)}>
               {severityHumanLabel(flag.severity)}
             </Badge>
-            {flag.chunk_index !== null && flag.chunk_index !== undefined && (
+            {flag.page_number !== null && flag.page_number !== undefined ? (
+              <Badge className="border-slate-200 bg-slate-100 text-slate-700">
+                Page {flag.page_number}
+              </Badge>
+            ) : flag.chunk_index !== null && flag.chunk_index !== undefined ? (
               <Badge className="border-slate-200 bg-slate-100 text-slate-600">
                 Chunk #{flag.chunk_index}
               </Badge>
-            )}
+            ) : null}
           </div>
           {flag.evidence && (
             <blockquote

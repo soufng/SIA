@@ -287,6 +287,44 @@ export async function analyzePdfAsync(file: File): Promise<AnalyzeJobAck> {
   }
 }
 
+export interface AnalyzeBatchJob extends AnalyzeJobAck {
+  original_filename: string;
+}
+
+export interface AnalyzeBatchAck {
+  success: boolean;
+  count: number;
+  jobs: AnalyzeBatchJob[];
+}
+
+/** POST /uploads/analyze/async/batch — accepts several PDFs and enqueues
+ *  one independent analysis per file. Returns one job_id per file. */
+export async function analyzeMultiplePdfsAsync(
+  files: File[],
+): Promise<AnalyzeBatchAck> {
+  if (files.length === 0) {
+    throw new Error("Au moins un fichier est requis.");
+  }
+  for (const f of files) {
+    if (!f.name.toLowerCase().endsWith(".pdf")) {
+      throw new Error(`Le fichier ${f.name} doit etre un PDF.`);
+    }
+  }
+  const form = new FormData();
+  for (const f of files) {
+    form.append("files", f, f.name);
+  }
+  try {
+    const { data } = await client().post<AnalyzeBatchAck>(
+      "/api/v1/uploads/analyze/async/batch",
+      form,
+    );
+    return data;
+  } catch (e) {
+    throw new Error(extractError(e));
+  }
+}
+
 /** GET /uploads/jobs/{id} — current state of the analyse job. */
 export async function fetchJobState(jobId: string): Promise<AnalyzeJobState> {
   try {

@@ -1,5 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
-@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap");
+/* Police arabe : IBM Plex Sans Arabic — design hybride Naskh/moderne,
+   excellente lisibilité écran, s'harmonise visuellement avec Inter. */
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -13,8 +15,20 @@
   }
   body {
     @apply bg-ccm-parchment text-ccm-ink antialiased;
-    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-      Roboto, sans-serif;
+    font-family: "Inter", "IBM Plex Sans Arabic", ui-sans-serif, system-ui,
+      -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  /* Tout élément marqué comme arabe (lang="ar" / dir="rtl") utilise
+     IBM Plex Sans Arabic en priorité, avec une taille légèrement
+     augmentée et un interligne plus généreux : le tracé arabe paraît
+     plus petit que le latin à pixel égal, et la lecture longue exige
+     plus d'air entre les lignes. */
+  :lang(ar),
+  [dir="rtl"] {
+    font-family: "IBM Plex Sans Arabic", "Segoe UI", "Tahoma", sans-serif;
+    font-size: 1.06em;
+    line-height: 1.85;
+    letter-spacing: 0;
   }
 }
 

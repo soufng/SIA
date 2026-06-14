@@ -41,6 +41,48 @@ from backend.services.vector_service import VectorService
 logger = logging.getLogger(__name__)
 
 
+def _attach_pages_to_moroccan(
+    moroccan_constants: dict[str, Any],
+    chunk_metadata: list[dict[str, Any]] | None,
+) -> None:
+    """Enrichit chaque flag/mention avec ``page_number`` via ``chunk_index``.
+
+    Le ``PrincipesMarocPipeline`` ne reçoit que la liste plate des chunks ;
+    cette fonction comble l'information page côté orchestration en
+    s'appuyant sur la table d'index produite par ``ChunkingService``. Si
+    le mapping est indisponible ou si le ``chunk_index`` ne correspond
+    pas, ``page_number`` reste à ``None`` — l'UI tombe alors sur
+    l'affichage chunk historique.
+    """
+    if not isinstance(moroccan_constants, dict):
+        return
+    if not chunk_metadata:
+        return
+
+    index_to_page: dict[int, Any] = {}
+    for entry in chunk_metadata:
+        if not isinstance(entry, dict):
+            continue
+        idx = entry.get("chunk_index")
+        if isinstance(idx, int):
+            index_to_page[idx] = entry.get("page_number")
+
+    def _enrich(items: Any) -> None:
+        if not isinstance(items, list):
+            return
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("page_number") is not None:
+                continue
+            idx = item.get("chunk_index")
+            if isinstance(idx, int) and idx in index_to_page:
+                item["page_number"] = index_to_page[idx]
+
+    _enrich(moroccan_constants.get("flags"))
+    _enrich(moroccan_constants.get("mentions"))
+
+
 class AnalysisService:
     """Wire pipelines together and produce the final analysis dict."""
 
@@ -197,6 +239,13 @@ class AnalysisService:
             moroccan_constants = self._principes_maroc_pipeline.analyze(
                 text=document.cleaned_text,
                 chunks=document.chunks,
+            )
+            # Le pipeline ne reçoit que la liste plate des chunks et ne
+            # connaît donc pas la page d'origine. On enrichit ses flags
+            # et mentions ici à partir de ``document.chunk_metadata`` —
+            # qui contient le couple ``(chunk_index, page_number)``.
+            _attach_pages_to_moroccan(
+                moroccan_constants, document.chunk_metadata
             )
 
             moderation = self.moderation_pipeline.run(
