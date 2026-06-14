@@ -106,9 +106,21 @@ build:image:
         -e SIA_ENV=development \
         -e SIA_OTP_ENABLED=false \
         sia-backend:ci
+      # On utilise python3 (présent dans l'image, contrairement à curl/wget
+      # qui ne sont pas dans python:3.12-slim). urlopen renvoie le code
+      # HTTP ; en cas d'HTTPError on récupère quand même le code via except.
       ok=0
       for i in $(seq 1 30); do
-        code=$(docker exec sia_ci sh -c "wget -q -O /dev/null -S http://127.0.0.1:8000/ 2>&1 | awk '/HTTP\\//{print \$2; exit}'" || true)
+        code=$(docker exec sia_ci python3 -c "
+      import urllib.request, urllib.error, sys
+      try:
+          r = urllib.request.urlopen('http://127.0.0.1:8000/', timeout=2)
+          print(r.status)
+      except urllib.error.HTTPError as e:
+          print(e.code)
+      except Exception:
+          print(0)
+      " 2>/dev/null || echo 0)
         if [ "$code" = "200" ] || [ "$code" = "503" ]; then
           echo "Backend responded ($code) after ${i}s"
           ok=1
