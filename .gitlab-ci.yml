@@ -1,269 +1,110 @@
 # GitLab CI/CD — SIA
 #
-# Trois stages :
-#   - test   : pytest backend + typecheck/build frontend (en parallèle)
-#   - build  : build de l'image Docker, smoke test, scan Trivy, push au
-#              registry GitLab uniquement sur main / dev
-#   - deploy : tag ``latest`` sur main (alias du sha buildé)
+# Architecture actuelle :
+#   - Un seul runner enregistré : le runner self-hosted Windows (executor:
+#     shell PowerShell), tag ``local``, avec accès au Docker Desktop de
+#     l'hôte.
+#   - Les jobs précédents en docker-in-docker (image: docker:27 + service
+#     dind) ne peuvent pas tourner ici : un runner shell ignore la
+#     directive ``image:`` et tente d'exécuter le script en PowerShell,
+#     ce qui échoue sur la syntaxe bash (line continuations \, for/done,
+#     [...]). Tant que tu n'auras pas activé un runner Linux (shared
+#     runners GitLab.com ou docker executor sur la machine), garde tout
+#     en PowerShell sur le runner local.
 #
-# Le registry utilisé est le GitLab Container Registry intégré
-# (``$CI_REGISTRY_IMAGE``) — aucun secret à configurer, les credentials
-# ``$CI_REGISTRY_USER`` / ``$CI_REGISTRY_PASSWORD`` sont fournis par GitLab.
+# Si tu veux réactiver les jobs Linux plus tard :
+#   1. Settings → CI/CD → Runners → "Enable shared runners for this project"
+#   2. Restaure les jobs backend:test / frontend:test / build:image / deploy:latest
+#      depuis l'historique git (`git log --oneline -- .gitlab-ci.yml`).
+#
+# Le job ``deploy:local`` rebuild l'image backend et le bundle frontend
+# directement sur ta machine, puis relance la stack docker-compose. Pas
+# besoin de passer par le registry GitLab.
 
 stages:
-  - test
-  - build
   - deploy
 
 variables:
-  # Cache pip/npm à la racine du projet pour qu'il soit ramassé par GitLab.
-  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  # Cache npm partagé entre les runs pour accélérer le rebuild frontend.
   NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.cache/npm"
-  IMAGE_TAG: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
-  IMAGE_BRANCH: "$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG"
-  IMAGE_LATEST: "$CI_REGISTRY_IMAGE:latest"
 
-# Annule les runs obsolètes dès qu'un nouveau commit arrive sur la même ref.
 default:
+  # Annule les runs obsolètes dès qu'un nouveau commit arrive sur la même ref.
   interruptible: true
 
 # ---------------------------------------------------------------------------
-# Stage : test
-# ---------------------------------------------------------------------------
-
-backend:test:
-  stage: test
-  image: python:3.12-slim
-  cache:
-    key:
-      files:
-        - requirements.txt
-    paths:
-      - .cache/pip
-  variables:
-    SIA_ENV: development
-  before_script:
-    - python -m pip install --upgrade pip
-    - pip install -r requirements.txt
-    - pip install pytest httpx
-  script:
-    - pytest tests/ -q --tb=short
-
-frontend:test:
-  stage: test
-  image: node:20-alpine
-  cache:
-    key:
-      files:
-        - frontend/package-lock.json
-    paths:
-      - .cache/npm
-      - frontend/node_modules
-  before_script:
-    - cd frontend
-    - npm ci --cache "$NPM_CONFIG_CACHE"
-  script:
-    - npm run typecheck
-    - npm run build
-  artifacts:
-    when: on_success
-    expire_in: 1 week
-    paths:
-      - frontend/dist/
-
-# ---------------------------------------------------------------------------
-# Stage : build
+# Deploy local — rebuild image + restart stack docker-compose.
 #
-# Tourne en mode docker-in-docker. L'image est buildée, smoke-testée, scannée
-# puis poussée sur le registry GitLab. Sur MR / branches non protégées on
-# build + smoke test mais on ne push pas — pas besoin de polluer le registry.
-# ---------------------------------------------------------------------------
-
-build:image:
-  stage: build
-  image: docker:27
-  services:
-    - docker:27-dind
-  variables:
-    DOCKER_DRIVER: overlay2
-    DOCKER_TLS_CERTDIR: "/certs"
-  needs:
-    - job: backend:test
-    - job: frontend:test
-  before_script:
-    - docker info
-    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
-  script:
-    # ---------- Build ----------
-    - docker build --pull -t sia-backend:ci -t "$IMAGE_TAG" -t "$IMAGE_BRANCH" .
-
-    # ---------- Smoke test ----------
-    # On vérifie que l'API démarre. Mongo/Qdrant ne sont pas joignables ici :
-    # un 200 ou un 503 (deps down) suffisent — l'important est que le binaire
-    # boot sans crasher.
-    - |
-      docker run -d --name sia_ci -p 8000:8000 \
-        -e SIA_ENV=development \
-        -e SIA_OTP_ENABLED=false \
-        sia-backend:ci
-      # On utilise python3 (présent dans l'image, contrairement à curl/wget
-      # qui ne sont pas dans python:3.12-slim). urlopen renvoie le code
-      # HTTP ; en cas d'HTTPError on récupère quand même le code via except.
-      ok=0
-      for i in $(seq 1 30); do
-        code=$(docker exec sia_ci python3 -c "
-      import urllib.request, urllib.error, sys
-      try:
-          r = urllib.request.urlopen('http://127.0.0.1:8000/', timeout=2)
-          print(r.status)
-      except urllib.error.HTTPError as e:
-          print(e.code)
-      except Exception:
-          print(0)
-      " 2>/dev/null || echo 0)
-        if [ "$code" = "200" ] || [ "$code" = "503" ]; then
-          echo "Backend responded ($code) after ${i}s"
-          ok=1
-          break
-        fi
-        sleep 1
-      done
-      docker logs sia_ci | tail -30
-      docker rm -f sia_ci
-      [ "$ok" = "1" ] || { echo "Backend did not respond within 30s"; exit 1; }
-
-    # ---------- Scan vulnérabilités ----------
-    # Trivy : strict sur main (échec si HIGH/CRITICAL non corrigée), tolérant
-    # ailleurs (signale sans bloquer).
-    - |
-      apk add --no-cache curl
-      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-        | sh -s -- -b /usr/local/bin
-      if [ "$CI_COMMIT_REF_NAME" = "main" ]; then
-        EXIT_CODE=1
-      else
-        EXIT_CODE=0
-      fi
-      trivy image \
-        --severity HIGH,CRITICAL \
-        --ignore-unfixed \
-        --exit-code "$EXIT_CODE" \
-        --no-progress \
-        sia-backend:ci
-
-    # ---------- Push (uniquement sur main / dev) ----------
-    - |
-      if [ "$CI_COMMIT_REF_NAME" = "main" ] || [ "$CI_COMMIT_REF_NAME" = "dev" ]; then
-        docker push "$IMAGE_TAG"
-        docker push "$IMAGE_BRANCH"
-      else
-        echo "Skip push — branche ${CI_COMMIT_REF_NAME} non protégée."
-      fi
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH
-
-# ---------------------------------------------------------------------------
-# Stage : deploy
-#
-# Promote l'image buildée en ``:latest`` sur main. Ne tourne que sur la
-# branche protégée — pas sur les MR ni sur dev.
-# ---------------------------------------------------------------------------
-
-deploy:latest:
-  stage: deploy
-  image: docker:27
-  services:
-    - docker:27-dind
-  variables:
-    DOCKER_TLS_CERTDIR: "/certs"
-  needs:
-    - job: build:image
-  before_script:
-    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
-  script:
-    - docker pull "$IMAGE_TAG"
-    - docker tag "$IMAGE_TAG" "$IMAGE_LATEST"
-    - docker push "$IMAGE_LATEST"
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-
-# ---------------------------------------------------------------------------
-# Stage : deploy — CD vers Docker Desktop local.
-#
-# Exécuté par un runner self-hosted (executor: shell) tagué ``local`` qui
-# tourne sur la machine cible. Le runner a accès au Docker Desktop de
-# l'hôte → il pull la dernière image et relance la stack.
-#
-# Pré-requis machine :
-#   - gitlab-runner installé et enregistré (tag = local, executor = shell)
+# Exécuté à chaque push sur ``dev``. Pré-requis machine :
+#   - gitlab-runner installé, enregistré avec executor=shell, tag=local
 #   - Docker Desktop démarré
-#   - Le repo clôné quelque part (le runner clône dans son workspace, donc
-#     pas besoin d'une copie manuelle)
-#   - Stack ``db`` (Mongo/Qdrant) déjà up — ce job ne touche que le backend
-#     et le frontend, les DBs sont gérées séparément
+#   - Node.js + npm dans le PATH (rebuild du frontend)
+#   - Stack ``db`` (Mongo/Qdrant) déjà up — gérée séparément via
+#     docker-compose.db.yml
+#
+# Le script est PowerShell-compatible : pas de continuations bash (\),
+# pas de for/done bash, et chaque appel d'exe se fait en une ligne.
 # ---------------------------------------------------------------------------
 
 deploy:local:
   stage: deploy
-  needs:
-    - job: build:image
   tags:
     - local
   environment:
     name: local-docker-desktop
     url: http://localhost:8080
-  before_script:
-    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
-  script:
-    # Pull la dernière image buildée par build:image (tag = sha court).
-    - docker pull "$IMAGE_TAG"
-    # On retag en sia-backend:local pour que docker-compose.full.yml la trouve.
-    - docker tag "$IMAGE_TAG" sia-backend:local
-    # Relance la stack — ``up -d`` recrée seulement les services dont l'image
-    # a changé. Le frontend nginx et son volume dist/ ne bougent pas.
-    - docker compose -f docker-compose.full.yml up -d
-    - docker compose -f docker-compose.full.yml ps
   rules:
     - if: $CI_COMMIT_BRANCH == "dev"
+  script:
+    # ---------- Rebuild frontend (dist/) ----------
+    # Le compose monte ``frontend/dist`` en volume read-only dans nginx,
+    # donc il faut le régénérer AVANT de relancer la stack pour que les
+    # changements UI soient visibles.
+    - Set-Location frontend
+    - npm ci --cache "$env:NPM_CONFIG_CACHE"
+    - npm run build
+    - Set-Location ..
+
+    # ---------- Rebuild backend image + restart ----------
+    # ``--build`` force la reconstruction de l'image ``sia-backend:local``
+    # même quand le tag existe déjà. ``up -d`` recrée uniquement les
+    # services dont l'image a changé.
+    - docker compose -f docker-compose.full.yml up --build -d
+
+    # ---------- Sanity check ----------
+    - docker compose -f docker-compose.full.yml ps
 
 # ---------------------------------------------------------------------------
-# GitLab Pages — publication du frontend statique.
+# GitLab Pages — publication du frontend statique sur
+# https://soufng.gitlab.io/SIA/.
 #
-# Le job DOIT s'appeler ``pages`` et déposer un artefact dans le dossier
-# ``public/`` pour que GitLab le publie sur https://soufng.gitlab.io/SIA/.
-# Le ``--base=/SIA/`` corrige les chemins absolus injectés par Vite
-# (sinon les assets cherchent ``/assets/...`` à la racine, qui n'existe pas
-# sur un Pages projet).
+# Ce job a besoin de Node + npm dans le PATH du runner. Réactivable
+# manuellement depuis l'UI GitLab : Pipelines → un pipeline sur main →
+# bouton "Play" sur le job ``pages``. ``when: manual`` évite de pousser
+# silencieusement un build cassé en prod tant que tu n'as pas testé.
 #
-# Le frontend déployé tente d'appeler ``http://127.0.0.1:8000`` par défaut
-# (cf. ``frontend/src/lib/api.ts``). Pour cibler un backend public, override
-# au build via la variable CI/CD ``VITE_API_BASE_URL``
-# (Settings → CI/CD → Variables).
+# Si tu veux que ça redevienne automatique sur main, change la rule
+# en ``- if: $CI_COMMIT_BRANCH == "main"``.
 # ---------------------------------------------------------------------------
 
 pages:
   stage: deploy
-  image: node:20-alpine
-  needs:
-    - job: frontend:test
-      artifacts: false
-  cache:
-    key:
-      files:
-        - frontend/package-lock.json
-    paths:
-      - .cache/npm
-      - frontend/node_modules
-  before_script:
-    - cd frontend
-    - npm ci --cache "$NPM_CONFIG_CACHE"
+  tags:
+    - local
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+      allow_failure: true
   script:
+    - Set-Location frontend
+    - npm ci --cache "$env:NPM_CONFIG_CACHE"
+    # --base=/SIA/ corrige les chemins absolus pour un Pages projet
+    # (https://soufng.gitlab.io/SIA/ et non la racine du domaine).
     - npm run build -- --base=/SIA/
-    - mv dist ../public
+    - Set-Location ..
+    - if (Test-Path public) { Remove-Item public -Recurse -Force }
+    - Move-Item frontend/dist public
   artifacts:
     paths:
       - public
     expire_in: 1 week
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
