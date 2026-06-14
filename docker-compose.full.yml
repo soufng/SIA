@@ -1,0 +1,62 @@
+# SIA — déploiement Docker (backend + frontend)
+#
+# Mongo et Qdrant tournent déjà en standalone (containers ``sia_mongodb`` et
+# ``sia_qdrant``) — ce compose ne les recrée pas pour préserver les données.
+# Le backend les joint via ``host.docker.internal`` puisque leurs ports
+# (27017 / 6333) sont publiés sur l'host.
+#
+# Démarrage :
+#   docker compose -f docker-compose.full.yml up --build -d
+#
+# Accès :
+#   - Frontend : http://localhost:8080
+#   - API      : http://localhost:8000  (docs sur /docs)
+#
+# Pré-requis :
+#   - frontend/dist/ doit exister (déjà présent). Sinon :
+#       cd frontend && npm ci && npm run build
+#   - Containers ``sia_mongodb`` et ``sia_qdrant`` up
+#     (renommés depuis ``spm_*``).
+#   - Ollama tourne sur l'host (``ollama serve`` + modèle pull).
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sia-backend:local
+    container_name: sia_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      SIA_ENV: development
+      # Mongo / Qdrant / Ollama tournent sur l'host — ports déjà publiés.
+      MONGODB_URL: mongodb://host.docker.internal:27017/sia
+      MONGO_DB_NAME: sia
+      SIA_QDRANT_URL: http://host.docker.internal
+      SIA_QDRANT_PORT: "6333"
+      SIA_RAG_LLM_BASE_URL: http://host.docker.internal:11434
+      SIA_OTP_ENABLED: "false"
+      SIA_AUTH_ENABLED: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Cache HuggingFace persistant — évite de re-télécharger e5-base
+      # (~430 MB) à chaque rebuild.
+      - hf_cache:/root/.cache/huggingface
+
+  frontend:
+    image: nginx:1-alpine
+    container_name: sia_frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - ./deploy/nginx-spa.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+
+volumes:
+  hf_cache:
