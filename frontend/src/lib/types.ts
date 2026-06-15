@@ -43,6 +43,20 @@ export interface PlagiarismMatch {
   match_quality_score?: number;
   boilerplate_ratio?: number;
   informative_word_count?: number;
+  // Composite plagiarism scoring (cf. backend/utils/composite_scoring.py).
+  // ``final_score`` est la note publique (cap anti faux-positif inclus).
+  // ``risk`` est la classe calculée côté backend ; à privilégier sur tout
+  // re-derivation depuis le pourcentage affiché.
+  semantic_score?: number;
+  lexical_score?: number;
+  exact_overlap_score?: number;
+  named_entity_overlap_score?: number;
+  dialogue_overlap_score?: number;
+  final_score?: number;
+  display_score?: number;
+  risk?: "low" | "medium" | "high" | "very_high" | string;
+  is_false_positive?: boolean;
+  debug_reason?: string | null;
 }
 
 export interface PlagiarismSource {

@@ -56,20 +56,34 @@ deploy:local:
   rules:
     - if: $CI_COMMIT_BRANCH == "dev"
   script:
+    # PowerShell ne stoppe pas le script quand un exe natif renvoie un code
+    # != 0 — il faut tester $LASTEXITCODE explicitement. Sans ça, un
+    # ``npm ci`` planté laisse ``npm run build`` continuer sur un dist vide,
+    # puis nginx renvoie 403 (cf. incident 2026-06-14).
+    - $ErrorActionPreference = "Stop"
+
     # ---------- Rebuild frontend (dist/) ----------
     # Le compose monte ``frontend/dist`` en volume read-only dans nginx,
     # donc il faut le régénérer AVANT de relancer la stack pour que les
-    # changements UI soient visibles.
+    # changements UI soient visibles. ``NPM_CONFIG_CACHE`` est lu auto-
+    # matiquement par npm — pas besoin du flag ``--cache``.
     - Set-Location frontend
-    - npm ci --cache "$env:NPM_CONFIG_CACHE"
+    - npm ci
+    - if ($LASTEXITCODE -ne 0) { throw "npm ci a échoué (exit $LASTEXITCODE)" }
     - npm run build
+    - if ($LASTEXITCODE -ne 0) { throw "npm run build a échoué (exit $LASTEXITCODE)" }
     - Set-Location ..
+
+    # Garde-fou : si dist/index.html manque, nginx renverra 403. Mieux vaut
+    # casser ici que déployer une stack silencieusement cassée.
+    - if (-not (Test-Path frontend/dist/index.html)) { throw "frontend/dist/index.html introuvable après le build" }
 
     # ---------- Rebuild backend image + restart ----------
     # ``--build`` force la reconstruction de l'image ``sia-backend:local``
     # même quand le tag existe déjà. ``up -d`` recrée uniquement les
     # services dont l'image a changé.
     - docker compose -f docker-compose.full.yml up --build -d
+    - if ($LASTEXITCODE -ne 0) { throw "docker compose up a échoué (exit $LASTEXITCODE)" }
 
     # ---------- Sanity check ----------
     - docker compose -f docker-compose.full.yml ps
@@ -96,11 +110,14 @@ pages:
       when: manual
       allow_failure: true
   script:
+    - $ErrorActionPreference = "Stop"
     - Set-Location frontend
-    - npm ci --cache "$env:NPM_CONFIG_CACHE"
+    - npm ci
+    - if ($LASTEXITCODE -ne 0) { throw "npm ci a échoué (exit $LASTEXITCODE)" }
     # --base=/SIA/ corrige les chemins absolus pour un Pages projet
     # (https://soufng.gitlab.io/SIA/ et non la racine du domaine).
     - npm run build -- --base=/SIA/
+    - if ($LASTEXITCODE -ne 0) { throw "npm run build a échoué (exit $LASTEXITCODE)" }
     - Set-Location ..
     - if (Test-Path public) { Remove-Item public -Recurse -Force }
     - Move-Item frontend/dist public

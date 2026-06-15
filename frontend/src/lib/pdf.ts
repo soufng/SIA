@@ -736,11 +736,32 @@ function drawPlagiarism(ctx: Ctx, analysis: Analysis): void {
           source.source_scenario_id ??
           `Source ${idx + 1}`
       );
+      // Recompute from the composite scores when available, so a source
+      // entirely composed of false positives is not displayed in red at
+      // 85% just because the raw cosine was high.
+      const sourceMatches = Array.isArray(source.matches)
+        ? (source.matches as Array<Record<string, unknown>>)
+        : [];
+      const realSourceMatches = sourceMatches.filter(
+        (m) => !m.is_false_positive
+      );
+      const realBestRatio = realSourceMatches.reduce((acc, m) => {
+        const candidate =
+          typeof m.final_score === "number"
+            ? (m.final_score as number)
+            : typeof m.display_score === "number"
+              ? (m.display_score as number) / 100
+              : Number(m.similarity_score ?? m.similarity ?? m.score ?? 0);
+        return Math.max(acc, candidate);
+      }, 0);
+      const fallbackBest = pick(source, "best_score_percent", "best_score") ?? 0;
       const best = toPercent(
-        pick(source, "best_score_percent", "best_score") ?? 0
+        realSourceMatches.length > 0 ? realBestRatio : fallbackBest
       );
       const matchesCount = toNumber(
-        pick(source, "matches_count", "displayed_matches_count") ?? 0
+        realSourceMatches.length > 0
+          ? realSourceMatches.length
+          : pick(source, "matches_count", "displayed_matches_count") ?? 0
       );
       const sourceRisk = riskFromScore(best);
 

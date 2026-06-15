@@ -215,7 +215,7 @@ class OllamaProvider:
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "llama3.2",
+        model: str = "aya-expanse:8b",
         max_tokens: int = 1200,
         temperature: float = 0.2,
         timeout: int = 60,
@@ -335,7 +335,7 @@ def get_llm_provider() -> LLMProvider:
                     continue
                 return OllamaProvider(
                     base_url=ollama_base_url,
-                    model=model or "llama3.2",
+                    model=model or "aya-expanse:8b",
                     max_tokens=max_tokens,
                     temperature=temperature,
                     timeout=timeout,

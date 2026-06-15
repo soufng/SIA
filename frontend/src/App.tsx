@@ -144,7 +144,6 @@ export default function App() {
             Plateforme d'analyse de scenarios &middot; Centre Cinematographique
             Marocain
           </p>
-          <p className="text-slate-400">v1.0</p>
         </div>
       </footer>
     </div>

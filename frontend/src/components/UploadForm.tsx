@@ -44,13 +44,14 @@ const FALLBACK_STAGE_LABEL = "Préparation de l'analyse";
 // Lissage de la barre de progression : le backend ne reporte que des
 // paliers grossiers (start / pipeline / persist / done), donc la valeur
 // réelle peut rester à 40 % pendant 30-60 s. Pour éviter l'impression
-// d'un freeze, on fait avancer la barre côté client entre deux updates
-// — strictement bornée par `progressPct + CREEP_CEILING_AHEAD` et par
-// `CREEP_HARD_CAP`, et toujours rattrapée si le backend remonte plus.
-const SMOOTHING_INTERVAL_MS = 500;
-const CREEP_PER_TICK = 0.35; // ~0.7 %/s — assez visible, pas trop rapide
-const CREEP_CEILING_AHEAD = 22; // jamais plus de +22 % au-dessus du réel
-const CREEP_HARD_CAP = 94; // tant que le backend n'a pas dit "completed"
+// d'un freeze, on fait avancer la barre côté client de manière
+// asymptotique : vite quand on est loin du plafond, plus lentement
+// quand on s'en approche — la barre ne se fige donc jamais visuellement,
+// et elle est toujours rattrapée si le backend remonte plus.
+const SMOOTHING_INTERVAL_MS = 250;
+const CREEP_APPROACH_RATIO = 0.018; // par tick : 1,8 % de la distance restante
+const CREEP_MIN_PER_TICK = 0.12; // garantit un mouvement visible même près du cap
+const CREEP_HARD_CAP = 96; // tant que le backend n'a pas dit "completed"
 
 // Pipeline UI map — voir commentaire historique : on déduit l'étape
 // courante de ``progress_pct``.
@@ -150,17 +151,20 @@ export function UploadForm() {
           // les jobs encore ``queued`` n'ont pas démarré côté serveur — on
           // ne fait pas creep leur barre pour ne pas mentir à l'utilisateur.
           if (j.status === "queued" || j.status === "uploading") return j;
-          // Cap = min(real + lookahead, hard cap). Display ne dépasse
-          // jamais cette borne tant que le backend n'a pas dit "completed".
-          const cap = Math.min(
-            j.progressPct + CREEP_CEILING_AHEAD,
-            CREEP_HARD_CAP,
+          // Progression asymptotique vers CREEP_HARD_CAP. La barre ralentit
+          // au lieu de se figer brusquement, donc l'utilisateur perçoit
+          // toujours un mouvement même si le backend ne remonte pas
+          // d'update pendant plusieurs secondes.
+          if (j.displayPct >= CREEP_HARD_CAP) return j;
+          const remaining = CREEP_HARD_CAP - j.displayPct;
+          const increment = Math.max(
+            CREEP_MIN_PER_TICK,
+            remaining * CREEP_APPROACH_RATIO,
           );
-          if (j.displayPct >= cap) return j;
           changed = true;
           return {
             ...j,
-            displayPct: Math.min(cap, j.displayPct + CREEP_PER_TICK),
+            displayPct: Math.min(CREEP_HARD_CAP, j.displayPct + increment),
           };
         });
         return changed ? next : prev;

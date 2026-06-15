@@ -796,36 +796,31 @@ function StrictMatchBanner({ match }: { match: StrictMatch | undefined }) {
 
 function HeaderSection({
   analysis,
-  scenarioId,
-  onDownload,
 }: {
   analysis: Analysis;
-  scenarioId: string | null;
-  onDownload: () => void;
 }) {
-  const risk = String(analysis.rag_report?.risk_level ?? "unknown");
+  const docStats = (analysis.document_stats ?? {}) as Record<string, unknown>;
+  const scenarioName =
+    (typeof docStats.original_filename === "string" && docStats.original_filename) ||
+    (typeof docStats.file_name === "string" && docStats.file_name) ||
+    "Scénario sans nom";
   return (
     <div className="space-y-2">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold text-ccm-ink">
+      <header className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-white px-6 py-7 shadow-sm">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-ccm-red/10 blur-3xl" />
+        <div className="pointer-events-none absolute -left-10 -bottom-10 h-32 w-32 rounded-full bg-ccm-gold/10 blur-3xl" />
+        <div className="relative flex flex-col gap-2">
+          <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-ccm-red">
+            <span className="h-1.5 w-6 rounded-full bg-ccm-red" />
+            Rapport d'analyse
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-ccm-ink sm:text-3xl">
             Résultats de l'analyse
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Scenario ID :{" "}
-            <span className="font-mono text-slate-700">
-              {fallback(scenarioId ?? analysis.scenario_id)}
-            </span>
+          <p className="mt-1 flex items-center gap-2 text-sm text-slate-600">
+            <FileText className="h-4 w-4 text-slate-400" />
+            <span className="font-medium text-slate-800">{scenarioName}</span>
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge className={cn(riskColor(risk), "text-sm px-3 py-1")}>
-            Risque : {formatRiskLabel(risk)}
-          </Badge>
-          <Button onClick={onDownload} variant="outline">
-            <Download className="h-4 w-4" />
-            Télécharger PDF
-          </Button>
         </div>
       </header>
     </div>
@@ -1313,19 +1308,49 @@ function SummarySection({ analysis }: { analysis: Analysis }) {
   );
 }
 
-function ScoreBar({ value }: { value: number }) {
+type RiskBucket = "low" | "medium" | "high" | "very_high";
+
+function ScoreBar({
+  value,
+  riskOverride,
+}: {
+  value: number;
+  // Quand le backend fournit déjà une classification de risque (cf.
+  // backend/utils/composite_scoring.py:risk_from_composite), on l'utilise
+  // tel quel au lieu de re-deriver depuis le pourcentage. Évite que deux
+  // scénarios sans aucun chevauchement lexical soient affichés "ÉLEVÉ"
+  // juste parce que le cosine brut est ~85% (signature de domaine).
+  riskOverride?: RiskBucket | string | null;
+}) {
   const pct = Math.max(
     0,
     Math.min(100, value <= 1 ? value * 100 : value)
   );
+  const bucket: RiskBucket =
+    riskOverride === "very_high" ||
+    riskOverride === "high" ||
+    riskOverride === "medium" ||
+    riskOverride === "low"
+      ? (riskOverride as RiskBucket)
+      : pct >= 75
+        ? "very_high"
+        : pct >= 40
+          ? "medium"
+          : "low";
   const color =
-    pct >= 75
+    bucket === "very_high" || bucket === "high"
       ? "bg-red-500"
-      : pct >= 40
+      : bucket === "medium"
         ? "bg-amber-500"
         : "bg-emerald-500";
   const label =
-    pct >= 75 ? "ÉLEVÉ" : pct >= 40 ? "MODÉRÉ" : "FAIBLE";
+    bucket === "very_high" || bucket === "high"
+      ? "ÉLEVÉ"
+      : bucket === "medium"
+        ? "MODÉRÉ"
+        : "FAIBLE";
+  const isHigh = bucket === "very_high" || bucket === "high";
+  const isMed = bucket === "medium";
   return (
     <div className="flex items-center gap-2 min-w-[180px]">
       <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
@@ -1340,11 +1365,9 @@ function ScoreBar({ value }: { value: number }) {
       <Badge
         className={cn(
           "text-[10px]",
-          pct >= 75 && "bg-red-100 text-red-700 border-red-200",
-          pct >= 40 &&
-            pct < 75 &&
-            "bg-amber-100 text-amber-700 border-amber-200",
-          pct < 40 && "bg-emerald-100 text-emerald-700 border-emerald-200"
+          isHigh && "bg-red-100 text-red-700 border-red-200",
+          isMed && "bg-amber-100 text-amber-700 border-amber-200",
+          !isHigh && !isMed && "bg-emerald-100 text-emerald-700 border-emerald-200"
         )}
       >
         {label}
@@ -1446,6 +1469,30 @@ function formatMatchPosition(m: PlagiarismMatch): {
   return { current, source };
 }
 
+// Le score "publiable" d'un match est le composite calculé côté backend
+// (cf. backend/utils/composite_scoring.py:compute_composite_scores). Il
+// applique des pénalités quand le cosine brut est élevé sans chevauchement
+// textuel réel — typique des deux scénarios français qui partagent le
+// vocabulaire de mise en forme (INT./EXT./JOUR/CUT TO/noms en CAPS) sans
+// avoir copié quoi que ce soit. On retombe sur le cosine brut uniquement
+// pour les anciens résultats stockés avant l'ajout du composite.
+function matchDisplayScore(match: PlagiarismMatch): number {
+  if (typeof match.final_score === "number") return match.final_score;
+  if (typeof match.display_score === "number") return match.display_score / 100;
+  return Number(
+    match.similarity_score ?? match.similarity ?? match.score ?? 0
+  );
+}
+
+function matchRiskBucket(match: PlagiarismMatch): string | null {
+  // ``is_false_positive`` est posé par is_likely_false_positive(): même si
+  // le composite n'est pas tombé en dessous du seuil "low", on refuse
+  // d'afficher "ÉLEVÉ" sur un signal que le backend a explicitement
+  // marqué comme faux positif.
+  if (match.is_false_positive) return "low";
+  return match.risk ?? null;
+}
+
 function PlagiarismMatchCard({
   match,
   index,
@@ -1464,9 +1511,8 @@ function PlagiarismMatchCard({
   );
   const currentChunk = String(match.chunk_text ?? "");
   const overlap = match.overlap_text ?? match.snippet ?? null;
-  const score = Number(
-    match.similarity_score ?? match.similarity ?? match.score ?? 0
-  );
+  const score = matchDisplayScore(match);
+  const riskBucket = matchRiskBucket(match);
   const { current, source } = formatMatchPosition(match);
   const isLong = extract.length > 400;
 
@@ -1487,7 +1533,7 @@ function PlagiarismMatchCard({
             </Badge>
           )}
         </div>
-        <ScoreBar value={score} />
+        <ScoreBar value={score} riskOverride={riskBucket} />
       </div>
 
       {/* Highlighted extract */}
@@ -1549,15 +1595,37 @@ function PlagiarismMatchesTable({
   matches: PlagiarismMatch[];
   startIndex?: number;
 }) {
+  // Masque les matches que le backend a explicitement marqués comme faux
+  // positifs (cosine élevé mais zéro chevauchement lexical / dialogue /
+  // named entity). Ils sont comptabilisés dans le bandeau ci-dessous pour
+  // que l'utilisateur sache qu'ils existent, sans polluer la lecture.
+  const filtered = matches.filter((m) => !m.is_false_positive);
+  const hidden = matches.length - filtered.length;
   return (
     <div className="space-y-3">
-      {matches.map((m, i) => (
+      {filtered.map((m, i) => (
         <PlagiarismMatchCard
           key={i}
           match={m}
           index={startIndex + i}
         />
       ))}
+      {filtered.length === 0 && hidden > 0 && (
+        <p className="text-xs italic text-slate-500">
+          Aucun passage de plagiat probant. {hidden} signal
+          {hidden > 1 ? "aux" : ""} faible
+          {hidden > 1 ? "s" : ""} masqué
+          {hidden > 1 ? "s" : ""} (similarité sémantique générique sans
+          chevauchement textuel).
+        </p>
+      )}
+      {filtered.length > 0 && hidden > 0 && (
+        <p className="text-xs italic text-slate-500">
+          +{hidden} signal{hidden > 1 ? "aux" : ""} faible
+          {hidden > 1 ? "s" : ""} masqué{hidden > 1 ? "s" : ""} (faux
+          positifs probables).
+        </p>
+      )}
     </div>
   );
 }
@@ -1570,9 +1638,26 @@ function PlagiarismSourceCard({
   index: number;
 }) {
   const matches = source.matches ?? [];
+  // Comptes / score "réels" calculés après filtrage des faux positifs : si
+  // les 5 matches du groupe sont marqués FP, on n'affiche pas "Meilleur
+  // score 85%" en rouge. Le best_score du backend est conservé en fallback
+  // pour les anciennes analyses sans le champ ``is_false_positive``.
+  const realMatches = matches.filter((m) => !m.is_false_positive);
+  const realBest = realMatches.reduce(
+    (acc, m) => Math.max(acc, matchDisplayScore(m)),
+    0
+  );
+  const bestRisk: RiskBucket =
+    realBest >= 0.75 ? "very_high"
+    : realBest >= 0.55 ? "high"
+    : realBest >= 0.30 ? "medium"
+    : "low";
   const totalCount = source.matches_count ?? matches.length;
   const displayedCount = source.displayed_matches_count ?? matches.length;
-  const bestScore = formatScore(source.best_score ?? 0, "%");
+  const bestScore = formatScore(
+    realMatches.length > 0 ? realBest : source.best_score ?? 0,
+    "%"
+  );
   const moreCount = Math.max(0, totalCount - displayedCount);
 
   return (
@@ -1604,7 +1689,7 @@ function PlagiarismSourceCard({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Badge className={cn(riskColor("high"), "font-mono")}>
+            <Badge className={cn(riskColor(bestRisk), "font-mono")}>
               Meilleur score : {bestScore}
             </Badge>
             <Badge className="bg-slate-100 text-slate-700 border-slate-200">
@@ -2174,8 +2259,11 @@ function RagErrorHint({ error }: { error: string }) {
     return (
       <p className="text-xs mt-2 text-slate-600">
         <strong>Modèle introuvable.</strong> Vérifie que{" "}
-        <code>SIA_RAG_LLM_MODEL</code> correspond à un modèle accessible avec
-        ta clé (ex. <code>gpt-4o-mini</code>, <code>gpt-4o</code>).
+        <code>SIA_RAG_LLM_MODEL</code> correspond à un modèle disponible. Sur
+        Ollama local, télécharge-le d'abord avec{" "}
+        <code>ollama pull aya-expanse:8b</code> (modèle utilisé par défaut
+        dans SIA pour le multilingue FR/AR). Tu peux lister les modèles
+        installés avec <code>ollama list</code>.
       </p>
     );
   }
@@ -3245,11 +3333,7 @@ export function ResultsPage() {
 
   return (
     <div className="space-y-6">
-      <HeaderSection
-        analysis={analysis}
-        scenarioId={scenarioId}
-        onDownload={handleDownload}
-      />
+      <HeaderSection analysis={analysis} />
 
       <StrictMatchBanner match={analysis.strict_match} />
 
