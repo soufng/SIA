@@ -31,6 +31,10 @@ def get_audit_log_repository() -> AuditLogRepository:
 def list_events(
     limit: int = Query(default=100, ge=1, le=1000),
     user_id: str | None = Query(default=None),
+    username: str | None = Query(
+        default=None,
+        description="Filtre par nom d'utilisateur (sous-chaîne, insensible à la casse).",
+    ),
     event_type: str | None = Query(default=None),
     since: str | None = Query(
         default=None,
@@ -41,6 +45,7 @@ def list_events(
     return audit.list_events(
         limit=limit,
         user_id=user_id,
+        username=username,
         event_type=event_type,
         since=since,
     )

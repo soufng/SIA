@@ -103,32 +103,23 @@ _SUBJECT_PATTERNS: dict[str, list[str]] = {
         r"الوحدة الوطنية",
     ],
     "monarchy": [
+        # Institutional vocabulary — neutral mentions stay neutral unless
+        # a trigger co-occurs.
         r"\bmonarchie\b",
         r"\broi\b",
         r"\bmonarque\b",
         r"\btr[ôo]ne\b",
-        r"\bmohammed\s+vi\b",
-        r"\bmohamed\s+vi\b",
-        r"\bm6\b",
-        # Anciens rois
-        r"\bhassan\s+ii\b",
-        r"\bhassan\s+2\b",
-        r"\bmohammed\s+v\b",
-        r"\bmohamed\s+v\b",
         r"\banciens?\s+rois?\b",
         r"\bfeu\s+(?:le\s+)?roi\b",
         r"\bpalais royal\b",
         r"\bcouronne\b",
         r"\bsidna\b",
         r"\bmalek\b",
-        # Arabic
+        # Arabic institutional vocabulary
         r"الملك",
         r"الملكية",
         r"العرش",
         r"المخزن",
-        r"الحسن الثاني",
-        r"محمد الخامس",
-        r"محمد السادس",
     ],
     "democratic_choice": [
         r"\bd[ée]mocrat\w+\b",
@@ -143,6 +134,69 @@ _SUBJECT_PATTERNS: dict[str, list[str]] = {
         r"الانتخابات",
     ],
 }
+
+
+# ---------- Royal personas (auto-flag) ----------
+#
+# Any nominative mention of a member of the Alaouite royal family — current
+# or historical — must be surfaced for manual review, even when the
+# surrounding text is descriptive or laudatory. The Moroccan editorial
+# tradition treats every royal mention as sensitive context worth
+# inspecting.
+#
+# These patterns are categorised under ``monarchy`` and produce an auto
+# flag at ``moyen`` severity by default. A severity trigger nearby will
+# escalate the flag through the standard pipeline (e.g. insult → élevé,
+# violence → très élevé).
+
+_ROYAL_PERSONA_PATTERNS: list[str] = [
+    # ----- Generic honorifics + given name -----
+    # ``Sidi``, ``Sidna``, ``Moulay`` and ``Lalla`` are honorifics reserved
+    # to the royal family in Moroccan usage. Any of them followed by a
+    # given name (≥3 letters, accepts spelling variants like
+    # ``Meryem``/``Meryeme``/``Marieme``) auto-flags as a royal mention.
+    # The ``(?:el\s+)?`` group catches "Sidi El Hassan", "Moulay El
+    # Yazid", etc.
+    r"\bsidi\s+(?:el\s+)?[a-zà-öø-ÿ\-']{3,}\b",
+    r"\bsidna\s+(?:el\s+)?[a-zà-öø-ÿ\-']{3,}\b",
+    r"\bmoulay\s+(?:el\s+)?[a-zà-öø-ÿ\-']{3,}\b",
+    r"\blalla\s+(?:el\s+)?[a-zà-öø-ÿ\-']{3,}\b",
+    # ----- Specific named references -----
+    # Mohammed VI — Roman or Arabic numeral
+    r"\b(?:sa\s+majest[ée]\s+)?(?:le\s+)?moham?med\s+(?:vi|6)\b",
+    r"\b(?:le\s+)?roi\s+moham?med\b",
+    r"\bm6\b",
+    # Late Hassan II
+    r"\b(?:feu\s+)?(?:sa\s+majest[ée]\s+)?(?:le\s+)?roi\s+hassan\b",
+    r"\bhassan\s+(?:ii|2)\b",
+    # Mohammed V — independence-era king
+    r"\b(?:feu\s+)?(?:le\s+)?roi\s+moham?med\s+(?:v|5)\b",
+    r"\bmoham?med\s+(?:v|5)\b",
+    # Crown prince
+    r"\bprince\s+h[ée]ritier\b",
+    # Generic royal family qualifier
+    r"\bfamille\s+royale\b",
+    r"\bfamille\s+r[ée]gnante\b",
+    r"\bcour\s+royale\b",
+    # ----- Arabic honorifics + name (generic) -----
+    r"سيدي\s+\S{3,}",
+    r"مولاي\s+\S{3,}",
+    r"لالة\s+\S{3,}",
+    r"الأميرة\s+\S{3,}",
+    r"الأمير\s+\S{3,}",
+    # Arabic specific named references
+    r"محمد\s+السادس",
+    r"محمد\s+الخامس",
+    r"الحسن\s+الثاني",
+    r"الحسن\s+الأول",
+    r"الأسرة\s+الملكية",
+    r"العائلة\s+الملكية",
+]
+
+
+_ROYAL_PERSONA_RE: list[re.Pattern[str]] = [
+    re.compile(p, re.IGNORECASE | re.UNICODE) for p in _ROYAL_PERSONA_PATTERNS
+]
 
 
 # ---------- Severity triggers ----------
@@ -256,12 +310,40 @@ _TRIGGERS: dict[str, list[str]] = {
         # Generic critical irony
         r"\bsoi[- ]disant\b",
         r"\bpr[ée]tendu\w*\b",
+        # Royal private life / royal family intimate claims. Mentioning
+        # the King's marriage, descendance, mistresses, divorces or any
+        # other personal-sphere matter inside a screenplay is sensitive
+        # in Morocco and warrants manual review even when the wording
+        # itself isn't insulting.
+        r"\benfants?\s+(?:d|du|de\s+l|d'?une|hors)\b",
+        r"\b[ée]pouse?s?\b",
+        r"\b[ée]pouser?\b",
+        r"\bma[îi]tress\w*\b",
+        r"\bamant\w*\b",
+        r"\bma[îi]tre[s]?\s+secrete?\b",
+        r"\bdivorc\w*\b",
+        r"\bse\s+marier?\b",
+        r"\bmariage\w*\b",
+        r"\bpolygam\w*\b",
+        r"\bvie\s+priv[ée]e?\b",
+        r"\bintimit[ée]\b",
+        r"\bharem\b",
+        r"\bautre\s+femme\b",
+        r"\bune\s+seule\s+fois\b",
+        # Religion sensitive personal claims
+        r"\bath[ée]e?\b",
+        r"\bapostat\w*\b",
         # Arabic
         r"ظلم",
         r"فساد",
         r"قمع",
         r"دكتاتورية",
         r"احتقار",
+        r"زوجة",
+        r"زوجات",
+        r"طلاق",
+        r"عشيقة",
+        r"حريم",
     ],
 }
 
@@ -425,7 +507,10 @@ class PrincipesMarocPipeline:
         """Detect flags AND every neutral mention inside a segment.
 
         Returns a ``(flags, mentions)`` tuple. Flags are the subset of
-        mentions that have a severity trigger nearby.
+        mentions that have a severity trigger nearby — *plus* any
+        nominative mention of a royal-family persona, which auto-flags
+        at ``moyen`` severity regardless of context (an escalating
+        trigger nearby still bumps it up).
         """
         flags: list[dict[str, Any]] = []
         mentions: list[dict[str, Any]] = []
@@ -455,7 +540,48 @@ class PrincipesMarocPipeline:
                                 subject_match=subject_match,
                             )
                         )
+
+        # Auto-flag every nominative mention of a royal-family persona.
+        # Any name from the Alaouite line — past or present — must surface
+        # for review, even without a co-occurring trigger.
+        for persona_pattern in _ROYAL_PERSONA_RE:
+            for persona_match in persona_pattern.finditer(segment):
+                trigger_severity = self._severity_for_subject_match(
+                    segment=segment,
+                    subject_start=persona_match.start(),
+                    subject_end=persona_match.end(),
+                )
+                # Floor at "moyen" — the bare mention itself is sensitive
+                # context. Any worse trigger nearby escalates further.
+                severity = self._max_severity(
+                    LEVEL_MOYEN, trigger_severity
+                )
+                flags.append(
+                    self._build_flag(
+                        category="monarchy",
+                        severity=severity,
+                        chunk_index=chunk_index,
+                        segment=segment,
+                        subject_match=persona_match,
+                    )
+                )
+                mentions.append(
+                    self._build_mention(
+                        category="monarchy",
+                        chunk_index=chunk_index,
+                        segment=segment,
+                        subject_match=persona_match,
+                        severity=severity,
+                    )
+                )
         return self._dedupe_flags(flags), mentions
+
+    @staticmethod
+    def _max_severity(a: str, b: str | None) -> str:
+        """Return whichever of ``a``/``b`` is the higher severity."""
+        if b is None:
+            return a
+        return a if _SEVERITY_WEIGHTS[a] >= _SEVERITY_WEIGHTS[b] else b
 
     @staticmethod
     def _build_mention(

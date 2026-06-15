@@ -147,12 +147,23 @@ def main() -> int:
             # Wipe any stale vectors for this scenario before inserting
             # so we don't accumulate duplicates across runs.
             vector.delete_scenario_vectors(scenario_id)
+            original_filename = (
+                doc.get("original_filename")
+                or (doc.get("document_stats") or {}).get("original_filename")
+            )
+            stored_filename = (
+                doc.get("stored_filename")
+                or (doc.get("document_stats") or {}).get("file_name")
+                or pdf_path.name
+            )
             vector.upsert_chunks(
                 scenario_id=scenario_id,
                 chunks=chunks,
                 embeddings=embeddings,
                 display_chunks=display_chunks,
                 chunk_metadata=metadata,
+                original_filename=original_filename,
+                stored_filename=stored_filename,
             )
         except Exception:
             logger.exception(

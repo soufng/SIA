@@ -193,7 +193,11 @@ class UsersRepository:
     def _get_database(self) -> Database:
         if self.database is not None:
             return self.database
-        return get_database(self.mongodb_url, self.database_name)
+        # ``get_database`` is now argumentless and always reads from
+        # ``settings``. The repository's ``mongodb_url``/``database_name``
+        # fields stay for backwards compatibility but are only used by
+        # tests that inject ``database`` directly.
+        return get_database()
 
 
 def _utcnow_iso() -> str:

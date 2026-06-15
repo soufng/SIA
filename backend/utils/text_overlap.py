@@ -124,11 +124,6 @@ def _maximal_common_runs(
             length = previous[j]
             if length < min_length:
                 continue
-            extends = (
-                j < len_b
-                and a_token == norm_b[j]
-                and previous[j] == previous[j] + 0  # placeholder no-op
-            )
             # The current row at column j+1 tells us whether the diagonal
             # continues. previous comes from row i-1, current is row i.
             continues_diagonal = (

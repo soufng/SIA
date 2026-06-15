@@ -49,7 +49,7 @@ interface AuthStore {
 
 export const useAuthStore = create<AuthStore>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       username: null,
       userId: null,
       role: null,

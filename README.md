@@ -126,10 +126,31 @@ Réponse 429 en français + header `Retry-After`.
 ## CI/CD
 
 Workflow GitHub Actions dans
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) : pytest backend,
-typecheck + build frontend, build de l'image Docker avec smoke test cold
-start. Déclenché sur push / PR vers `main` et `develop`, ou
-manuellement via `workflow_dispatch`.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml). Déclenché sur
+push / PR vers `main` et `dev`, ou manuellement via
+`workflow_dispatch`.
+
+Trois jobs :
+
+1. **Backend** — `pytest tests/` sur Python 3.12.
+2. **Frontend** — `tsc --noEmit` strict puis `vite build`.
+3. **Docker** — build l'image, smoke test (lance le container et vérifie
+   que l'API répond sur `/`), puis sur `push` vers `main` ou `dev` push
+   l'image vers GitHub Container Registry sous
+   `ghcr.io/<owner>/sia-backend` avec les tags :
+   - `dev` ou `main` (selon la branche),
+   - `sha-<short-sha>` (immuable, pratique pour rollback),
+   - `latest` (uniquement sur `main`).
+
+Les PR ne pushent pas l'image (les secrets GHCR ne sont pas exposés
+aux forks). Le `GITHUB_TOKEN` par défaut suffit — aucune configuration
+manuelle requise.
+
+Pour récupérer une image publiée :
+
+```bash
+docker pull ghcr.io/<owner>/sia-backend:dev
+```
 
 ## Structure du repo
 

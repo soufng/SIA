@@ -1,0 +1,127 @@
+# GitLab CI/CD — SIA
+#
+# Architecture actuelle :
+#   - Un seul runner enregistré : le runner self-hosted Windows (executor:
+#     shell PowerShell), tag ``local``, avec accès au Docker Desktop de
+#     l'hôte.
+#   - Les jobs précédents en docker-in-docker (image: docker:27 + service
+#     dind) ne peuvent pas tourner ici : un runner shell ignore la
+#     directive ``image:`` et tente d'exécuter le script en PowerShell,
+#     ce qui échoue sur la syntaxe bash (line continuations \, for/done,
+#     [...]). Tant que tu n'auras pas activé un runner Linux (shared
+#     runners GitLab.com ou docker executor sur la machine), garde tout
+#     en PowerShell sur le runner local.
+#
+# Si tu veux réactiver les jobs Linux plus tard :
+#   1. Settings → CI/CD → Runners → "Enable shared runners for this project"
+#   2. Restaure les jobs backend:test / frontend:test / build:image / deploy:latest
+#      depuis l'historique git (`git log --oneline -- .gitlab-ci.yml`).
+#
+# Le job ``deploy:local`` rebuild l'image backend et le bundle frontend
+# directement sur ta machine, puis relance la stack docker-compose. Pas
+# besoin de passer par le registry GitLab.
+
+stages:
+  - deploy
+
+variables:
+  # Cache npm partagé entre les runs pour accélérer le rebuild frontend.
+  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.cache/npm"
+
+default:
+  # Annule les runs obsolètes dès qu'un nouveau commit arrive sur la même ref.
+  interruptible: true
+
+# ---------------------------------------------------------------------------
+# Deploy local — rebuild image + restart stack docker-compose.
+#
+# Exécuté à chaque push sur ``dev``. Pré-requis machine :
+#   - gitlab-runner installé, enregistré avec executor=shell, tag=local
+#   - Docker Desktop démarré
+#   - Node.js + npm dans le PATH (rebuild du frontend)
+#   - Stack ``db`` (Mongo/Qdrant) déjà up — gérée séparément via
+#     docker-compose.db.yml
+#
+# Le script est PowerShell-compatible : pas de continuations bash (\),
+# pas de for/done bash, et chaque appel d'exe se fait en une ligne.
+# ---------------------------------------------------------------------------
+
+deploy:local:
+  stage: deploy
+  tags:
+    - local
+  environment:
+    name: local-docker-desktop
+    url: http://localhost:8080
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+  script:
+    # PowerShell ne stoppe pas le script quand un exe natif renvoie un code
+    # != 0 — il faut tester $LASTEXITCODE explicitement. Sans ça, un
+    # ``npm ci`` planté laisse ``npm run build`` continuer sur un dist vide,
+    # puis nginx renvoie 403 (cf. incident 2026-06-14).
+    - $ErrorActionPreference = "Stop"
+
+    # ---------- Rebuild frontend (dist/) ----------
+    # Le compose monte ``frontend/dist`` en volume read-only dans nginx,
+    # donc il faut le régénérer AVANT de relancer la stack pour que les
+    # changements UI soient visibles. ``NPM_CONFIG_CACHE`` est lu auto-
+    # matiquement par npm — pas besoin du flag ``--cache``.
+    - Set-Location frontend
+    - npm ci
+    - if ($LASTEXITCODE -ne 0) { throw "npm ci a échoué (exit $LASTEXITCODE)" }
+    - npm run build
+    - if ($LASTEXITCODE -ne 0) { throw "npm run build a échoué (exit $LASTEXITCODE)" }
+    - Set-Location ..
+
+    # Garde-fou : si dist/index.html manque, nginx renverra 403. Mieux vaut
+    # casser ici que déployer une stack silencieusement cassée.
+    - if (-not (Test-Path frontend/dist/index.html)) { throw "frontend/dist/index.html introuvable après le build" }
+
+    # ---------- Rebuild backend image + restart ----------
+    # ``--build`` force la reconstruction de l'image ``sia-backend:local``
+    # même quand le tag existe déjà. ``up -d`` recrée uniquement les
+    # services dont l'image a changé.
+    - docker compose -f docker-compose.full.yml up --build -d
+    - if ($LASTEXITCODE -ne 0) { throw "docker compose up a échoué (exit $LASTEXITCODE)" }
+
+    # ---------- Sanity check ----------
+    - docker compose -f docker-compose.full.yml ps
+
+# ---------------------------------------------------------------------------
+# GitLab Pages — publication du frontend statique sur
+# https://soufng.gitlab.io/SIA/.
+#
+# Ce job a besoin de Node + npm dans le PATH du runner. Réactivable
+# manuellement depuis l'UI GitLab : Pipelines → un pipeline sur main →
+# bouton "Play" sur le job ``pages``. ``when: manual`` évite de pousser
+# silencieusement un build cassé en prod tant que tu n'as pas testé.
+#
+# Si tu veux que ça redevienne automatique sur main, change la rule
+# en ``- if: $CI_COMMIT_BRANCH == "main"``.
+# ---------------------------------------------------------------------------
+
+pages:
+  stage: deploy
+  tags:
+    - local
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+      allow_failure: true
+  script:
+    - $ErrorActionPreference = "Stop"
+    - Set-Location frontend
+    - npm ci
+    - if ($LASTEXITCODE -ne 0) { throw "npm ci a échoué (exit $LASTEXITCODE)" }
+    # --base=/SIA/ corrige les chemins absolus pour un Pages projet
+    # (https://soufng.gitlab.io/SIA/ et non la racine du domaine).
+    - npm run build -- --base=/SIA/
+    - if ($LASTEXITCODE -ne 0) { throw "npm run build a échoué (exit $LASTEXITCODE)" }
+    - Set-Location ..
+    - if (Test-Path public) { Remove-Item public -Recurse -Force }
+    - Move-Item frontend/dist public
+  artifacts:
+    paths:
+      - public
+    expire_in: 1 week

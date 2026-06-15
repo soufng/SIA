@@ -185,15 +185,27 @@ def test_moroccan_constants_flags_are_passed_to_rag_prompt() -> None:
     assert "Constantes nationales marocaines" in narrative
 
 
-def test_moroccan_constants_only_report_does_not_call_slow_llm() -> None:
-    class FailingProvider:
-        name = "slow"
-        model = "slow-model"
+def test_moroccan_constants_only_report_invokes_llm_as_second_reader() -> None:
+    """When Moroccan flags exist but there are no plagiarism passages the LLM
+    is still called: it must explain the flags and suggest reformulations
+    rather than be short-circuited."""
+
+    calls: list[tuple[str, str]] = []
+
+    class RecordingProvider:
+        name = "recording"
+        model = "rec-1"
 
         def complete(self, system: str, user: str) -> LLMResponse:
-            raise AssertionError("LLM should not be called")
+            calls.append((system, user))
+            return LLMResponse(
+                text="Rapport LLM expliquant la flag monarchie.",
+                provider=self.name,
+                model=self.model,
+                used_fallback=False,
+            )
 
-    service = AdvancedRAGService(llm_provider=FailingProvider())
+    service = AdvancedRAGService(llm_provider=RecordingProvider())
     analysis = _analysis_fixture(matches=[], score=0.0, total_matches=0)
     analysis["moroccan_constants"] = {
         "score": 0.6,
@@ -211,10 +223,10 @@ def test_moroccan_constants_only_report_does_not_call_slow_llm() -> None:
 
     report = service.generate(analysis=analysis, scenario_id="scenario-X")
 
-    assert report["llm"]["provider"] == "mock"
-    assert report["llm"]["used_fallback"] is True
-    assert report["llm"]["error"] is None
-    assert "Le roi est un tyran corrompu." in report["narrative"]
+    assert len(calls) == 1, "LLM should be called now (second-reader contract)"
+    assert report["llm"]["provider"] == "recording"
+    assert report["llm"]["used_fallback"] is False
+    assert report["narrative"] == "Rapport LLM expliquant la flag monarchie."
 
 
 def test_exact_duplicate_prompt_prioritizes_internal_duplicate() -> None:

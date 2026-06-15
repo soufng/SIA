@@ -1,0 +1,15 @@
+# Dépendances pour les notebooks d'analyse / évaluation (volet
+# Science de données du PFE). Séparées du runtime pour ne pas alourdir
+# l'image Docker de production.
+#
+# Installation :
+#   pip install -r requirements.dev.txt
+
+jupyter
+ipykernel
+pandas
+matplotlib
+seaborn
+scikit-learn
+umap-learn
+langdetect

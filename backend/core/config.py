@@ -27,12 +27,27 @@ class Settings(BaseSettings):
     #                 valeur par défaut publique.
     ENV: str = Field(default="development", validation_alias="SIA_ENV")
     DEBUG: bool = Field(default=True, validation_alias="SIA_DEBUG")
-    MONGODB_URL: str = "mongodb://127.0.0.1:27017/sia"
-    MONGO_DB_NAME: str = "sia"
+    # Les env vars ci-dessous suivent le préfixe ``SIA_`` comme partout
+    # ailleurs dans ce fichier. Sans ``validation_alias``, pydantic
+    # cherchait ``QDRANT_URL`` (sans préfixe) qui n'existe pas, gardait le
+    # défaut ``http://localhost``, et l'analyse cassait sur ``[Errno 111]
+    # Connection refused`` côté Qdrant. ``MONGODB_URL`` marchait par chance
+    # parce que la var d'env historique porte le même nom que le field.
+    MONGODB_URL: str = Field(
+        default="mongodb://127.0.0.1:27017/sia",
+        validation_alias="MONGODB_URL",
+    )
+    MONGO_DB_NAME: str = Field(default="sia", validation_alias="MONGO_DB_NAME")
     MONGODB_DATABASE: str = "sia"
-    QDRANT_URL: str = "http://localhost"
-    QDRANT_PORT: int = 6333
-    QDRANT_COLLECTION_NAME: str = "scenario_chunks"
+    QDRANT_URL: str = Field(
+        default="http://localhost",
+        validation_alias="SIA_QDRANT_URL",
+    )
+    QDRANT_PORT: int = Field(default=6333, validation_alias="SIA_QDRANT_PORT")
+    QDRANT_COLLECTION_NAME: str = Field(
+        default="scenario_chunks",
+        validation_alias="SIA_QDRANT_COLLECTION_NAME",
+    )
     EMBEDDING_MODEL_NAME: str = Field(
         default="intfloat/multilingual-e5-base",
         validation_alias="SIA_EMBEDDING_MODEL",
@@ -99,6 +114,26 @@ class Settings(BaseSettings):
     ADVANCED_RAG_MAX_PASSAGES: int = Field(default=6, validation_alias="SIA_RAG_MAX_PASSAGES")
     ADVANCED_RAG_TEMPERATURE: float = Field(default=0.2, validation_alias="SIA_RAG_LLM_TEMPERATURE")
     ADVANCED_RAG_TIMEOUT_SECONDS: int = Field(default=45, validation_alias="SIA_RAG_LLM_TIMEOUT_SECONDS")
+    # Multi-query retrieval: LLM rewrites the document into N semantic queries
+    # and we search Qdrant once per query. Off by default so behaviour matches
+    # the current pipeline until the new path is validated in shadow mode.
+    ADVANCED_RAG_MULTI_QUERY_ENABLED: bool = Field(
+        default=False, validation_alias="SIA_RAG_MULTI_QUERY_ENABLED"
+    )
+    ADVANCED_RAG_MULTI_QUERY_COUNT: int = Field(
+        default=4, validation_alias="SIA_RAG_MULTI_QUERY_COUNT"
+    )
+    # LLM reranking: a wider candidate pool is collected (cosine top-N),
+    # then an LLM scores each candidate for editorial relevance to the
+    # uploaded document; the top ``ADVANCED_RAG_MAX_PASSAGES`` are kept.
+    # Off by default — enable once you have a model that produces stable
+    # JSON (Qwen 2.5 14B or larger, Mistral Small, Claude Haiku, etc.).
+    ADVANCED_RAG_RERANK_ENABLED: bool = Field(
+        default=False, validation_alias="SIA_RAG_RERANK_ENABLED"
+    )
+    ADVANCED_RAG_RERANK_POOL_SIZE: int = Field(
+        default=20, validation_alias="SIA_RAG_RERANK_POOL_SIZE"
+    )
 
     # ---- Uploads ----
     # Taille maximale d'un PDF accepté par /uploads/analyze (Mo). 0 désactive.

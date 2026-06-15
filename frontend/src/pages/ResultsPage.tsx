@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   PolarAngleAxis,
   RadialBar,
@@ -24,6 +24,7 @@ import {
   Moon,
   Search,
   ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Target,
   Vote,
@@ -35,7 +36,13 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Table, TBody, THead, Td, Th, Tr } from "@/components/ui/table";
 import { useAnalysisStore } from "@/store/analysis";
-import { downloadPdfReport } from "@/lib/pdf";
+// jspdf + jspdf-autotable + html2canvas weigh ~350 KB combined. We import
+// them lazily so users who never download a PDF report don't pay that cost
+// on page load.
+async function downloadPdfReport(...args: Parameters<typeof import("@/lib/pdf").downloadPdfReport>) {
+  const mod = await import("@/lib/pdf");
+  return mod.downloadPdfReport(...args);
+}
 import { generateAdvancedReport, type AdvancedReport } from "@/lib/api";
 import { cn, formatRiskLabel, formatScore, riskColor } from "@/lib/utils";
 import type {
@@ -89,13 +96,6 @@ function translateLanguage(language?: string): string {
   return LANGUAGE_LABELS_FR[key] ?? LANGUAGE_LABELS_FR[key.toLowerCase()] ?? key;
 }
 
-function truncate(text: string, max = 400): string {
-  if (!text) return "";
-  const compact = text.replace(/\s+/g, " ").trim();
-  if (compact.length <= max) return compact;
-  return compact.slice(0, max).trimEnd() + "...";
-}
-
 const RETRIEVAL_STATUS_FR: Record<string, string> = {
   qdrant_unavailable: "Qdrant indisponible",
   corpus_empty: "corpus vide",
@@ -115,6 +115,298 @@ function fallback(value: unknown): string {
     return "non disponible";
   }
   return s;
+}
+
+// Normalise les Arabic Presentation Forms (FExx) en caracteres standard,
+// force un saut de ligne a chaque transition arabe<->latin, et separe les
+// numeros de scene / didascalies. Sans ca les extraits PDF s'affichent en
+// un seul pave illisible ou le mix FR/AR rend la lecture impossible.
+function normalizeBilingualText(text: string | null | undefined): string {
+  if (!text) return "";
+  let out = String(text).normalize("NFKC");
+  // Saut de ligne a chaque transition entre alphabet latin et arabe.
+  // \p{Script=Latin} et \p{Script=Arabic} ciblent uniquement les lettres
+  // (les chiffres et ponctuations ne declenchent pas un retour ligne).
+  out = out.replace(/(\p{Script=Latin})(\s*)(\p{Script=Arabic})/gu, "$1\n$3");
+  out = out.replace(/(\p{Script=Arabic})(\s*)(\p{Script=Latin})/gu, "$1\n$3");
+  // Saut de ligne avant "<num>. " ou "<num> - " typiquement debut de scene
+  out = out.replace(/\s*(\d{1,3}\s*[-.]\s+)/g, "\n$1");
+  // Saut de ligne avant les didascalies majuscules courantes
+  out = out.replace(
+    /\s+((?:Int|Ext|INT|EXT|FONDU|RACCORD)[\s.\-/])/g,
+    "\n$1"
+  );
+  // Saut de ligne quand un changement de speaker apparait apres un point
+  out = out.replace(/([.!?…])\s+(?=[A-ZÀ-Ý؀-ۿ])/g, "$1\n");
+  // Limite a 2 retours consecutifs
+  out = out.replace(/\n{3,}/g, "\n\n");
+  return out.trim();
+}
+
+// Bloc d'extrait bilingue FR/AR : NFKC + unicode-bidi:plaintext qui isole
+// chaque ligne dans son propre contexte de direction, ce qui rend les
+// melanges français/arabe lisibles sans casser le RTL.
+function BilingualBlock({
+  text,
+  tone = "blue",
+}: {
+  text: string;
+  tone?: "blue" | "amber";
+}) {
+  const colors =
+    tone === "amber"
+      ? "border-amber-200 bg-amber-50/50"
+      : "border-blue-200 bg-blue-50/50";
+  return (
+    <p
+      className={`text-slate-800 leading-loose whitespace-pre-wrap font-sans ${colors}`}
+      style={{
+        unicodeBidi: "plaintext",
+        wordBreak: "break-word",
+        fontFamily:
+          "'IBM Plex Sans Arabic', 'Segoe UI', system-ui, -apple-system, sans-serif",
+      }}
+      dir="auto"
+    >
+      {normalizeBilingualText(text)}
+    </p>
+  );
+}
+
+// Parsing minimaliste du markdown produit par le LLM RAG. On ne tire pas
+// react-markdown pour ne pas alourdir le bundle, le format est tres
+// previsible (titres "##", listes numerotees ou puces, gras "**...**").
+type RAGInline =
+  | { kind: "text"; value: string }
+  | { kind: "bold"; value: string };
+
+type RAGBlock =
+  | { kind: "heading"; text: string }
+  | { kind: "paragraph"; inlines: RAGInline[] }
+  | { kind: "list"; ordered: boolean; items: RAGInline[][] };
+
+function parseInlines(line: string): RAGInline[] {
+  const parts: RAGInline[] = [];
+  const re = /\*\*([^*]+)\*\*/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > last) {
+      parts.push({ kind: "text", value: line.slice(last, m.index) });
+    }
+    parts.push({ kind: "bold", value: m[1] });
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) {
+    parts.push({ kind: "text", value: line.slice(last) });
+  }
+  return parts.length ? parts : [{ kind: "text", value: line }];
+}
+
+function parseRAGMarkdown(text: string): RAGBlock[] {
+  const blocks: RAGBlock[] = [];
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    if (!line) {
+      i++;
+      continue;
+    }
+    const heading = line.match(/^#{1,4}\s+(.+?):?\s*$/);
+    if (heading) {
+      blocks.push({ kind: "heading", text: heading[1].replace(/\*+/g, "") });
+      i++;
+      continue;
+    }
+    // Le LLM ecrit parfois "**Titre :**" seul sur sa ligne — on le promeut en titre.
+    const boldHeading = line.match(/^\*\*([^*]+?)\s*:?\*\*\s*:?\s*$/);
+    if (boldHeading) {
+      blocks.push({ kind: "heading", text: boldHeading[1] });
+      i++;
+      continue;
+    }
+    if (/^(\d+\.|[-*•])\s+/.test(line)) {
+      const items: RAGInline[][] = [];
+      const ordered = /^\d+\./.test(line);
+      while (i < lines.length) {
+        const cur = lines[i].trim();
+        if (!cur) {
+          i++;
+          continue;
+        }
+        const itemMatch = cur.match(/^(?:\d+\.|[-*•])\s+(.+)$/);
+        if (!itemMatch) break;
+        items.push(parseInlines(itemMatch[1]));
+        i++;
+      }
+      blocks.push({ kind: "list", ordered, items });
+      continue;
+    }
+    blocks.push({ kind: "paragraph", inlines: parseInlines(line) });
+    i++;
+  }
+  return blocks;
+}
+
+const RAG_SECTION_META: Record<
+  string,
+  { icon: typeof FileText; tone: string; accent: string }
+> = {
+  synthese: { icon: Sparkles, tone: "text-blue-700", accent: "border-l-blue-500" },
+  interpretation: { icon: BarChart3, tone: "text-violet-700", accent: "border-l-violet-500" },
+  analyse: { icon: Search, tone: "text-amber-700", accent: "border-l-amber-500" },
+  consequence: { icon: AlertTriangle, tone: "text-rose-700", accent: "border-l-rose-500" },
+  duplication: { icon: ClipboardCopy, tone: "text-orange-700", accent: "border-l-orange-500" },
+  moderation: { icon: ShieldAlert, tone: "text-rose-700", accent: "border-l-rose-500" },
+  constantes: { icon: Landmark, tone: "text-emerald-700", accent: "border-l-emerald-500" },
+  limites: { icon: Info, tone: "text-slate-700", accent: "border-l-slate-400" },
+  action: { icon: ListChecks, tone: "text-emerald-700", accent: "border-l-emerald-500" },
+  recommand: { icon: ListChecks, tone: "text-emerald-700", accent: "border-l-emerald-500" },
+  conclusion: { icon: Target, tone: "text-slate-800", accent: "border-l-slate-700" },
+};
+
+function sectionMetaFor(title: string) {
+  const norm = title
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+  for (const key of Object.keys(RAG_SECTION_META)) {
+    if (norm.includes(key)) return RAG_SECTION_META[key];
+  }
+  return { icon: FileText, tone: "text-slate-700", accent: "border-l-slate-400" };
+}
+
+function RAGInlineRun({ parts }: { parts: RAGInline[] }) {
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.kind === "bold" ? (
+          <strong key={i} className="font-semibold text-slate-900">
+            {part.value}
+          </strong>
+        ) : (
+          <span key={i}>{part.value}</span>
+        )
+      )}
+    </>
+  );
+}
+
+function RAGNarrative({ narrative }: { narrative: string }) {
+  const blocks = useMemo(() => parseRAGMarkdown(narrative || ""), [narrative]);
+  if (!narrative?.trim()) {
+    return (
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500 italic">
+        Rapport vide.
+      </div>
+    );
+  }
+
+  // Regroupe les blocs par section : un heading ouvre une nouvelle section,
+  // les blocs suivants y sont accumules jusqu'au prochain heading.
+  const sections: { title: string | null; blocks: RAGBlock[] }[] = [];
+  let current: { title: string | null; blocks: RAGBlock[] } = {
+    title: null,
+    blocks: [],
+  };
+  for (const b of blocks) {
+    if (b.kind === "heading") {
+      if (current.title || current.blocks.length) sections.push(current);
+      current = { title: b.text, blocks: [] };
+    } else {
+      current.blocks.push(b);
+    }
+  }
+  if (current.title || current.blocks.length) sections.push(current);
+
+  return (
+    <div className="space-y-4">
+      {sections.map((section, idx) => {
+        const meta = section.title
+          ? sectionMetaFor(section.title)
+          : { icon: FileText, tone: "text-slate-700", accent: "border-l-slate-300" };
+        const Icon = meta.icon;
+        return (
+          <section
+            key={idx}
+            className={cn(
+              "rounded-r-md border-l-4 bg-white shadow-sm border border-slate-200 px-5 py-4",
+              meta.accent
+            )}
+          >
+            {section.title && (
+              <h3
+                className={cn(
+                  "flex items-center gap-2 font-semibold text-base mb-3",
+                  meta.tone
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {section.title}
+              </h3>
+            )}
+            <div className="space-y-3 text-sm leading-relaxed text-slate-800">
+              {section.blocks.map((b, j) => {
+                if (b.kind === "paragraph") {
+                  return (
+                    <p
+                      key={j}
+                      dir="auto"
+                      style={{ unicodeBidi: "plaintext" }}
+                    >
+                      <RAGInlineRun parts={b.inlines} />
+                    </p>
+                  );
+                }
+                if (b.kind === "list") {
+                  if (b.ordered) {
+                    return (
+                      <ol
+                        key={j}
+                        className="space-y-2 ml-1"
+                        dir="auto"
+                        style={{ unicodeBidi: "plaintext" }}
+                      >
+                        {b.items.map((item, k) => (
+                          <li key={k} className="flex gap-3">
+                            <span className="shrink-0 h-6 w-6 rounded-full bg-ccm-red/10 text-ccm-red text-xs font-semibold flex items-center justify-center">
+                              {k + 1}
+                            </span>
+                            <span className="flex-1">
+                              <RAGInlineRun parts={item} />
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    );
+                  }
+                  return (
+                    <ul
+                      key={j}
+                      className="space-y-2 ml-1"
+                      dir="auto"
+                      style={{ unicodeBidi: "plaintext" }}
+                    >
+                      {b.items.map((item, k) => (
+                        <li key={k} className="flex gap-3">
+                          <span className="shrink-0 mt-1.5 h-1.5 w-1.5 rounded-full bg-ccm-red" />
+                          <span className="flex-1">
+                            <RAGInlineRun parts={item} />
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  );
+                }
+                return null;
+              })}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
 }
 
 interface VulgarityGroup {
@@ -451,7 +743,7 @@ function StrictMatchBanner({ match }: { match: StrictMatch | undefined }) {
               return (
                 <li key={i}>
                   <span className="font-medium">« {name} »</span> —{" "}
-                  {e.score_percent.toFixed(2)}%
+                  {Math.round(e.score_percent)}%
                 </li>
               );
             })}
@@ -504,36 +796,31 @@ function StrictMatchBanner({ match }: { match: StrictMatch | undefined }) {
 
 function HeaderSection({
   analysis,
-  scenarioId,
-  onDownload,
 }: {
   analysis: Analysis;
-  scenarioId: string | null;
-  onDownload: () => void;
 }) {
-  const risk = String(analysis.rag_report?.risk_level ?? "unknown");
+  const docStats = (analysis.document_stats ?? {}) as Record<string, unknown>;
+  const scenarioName =
+    (typeof docStats.original_filename === "string" && docStats.original_filename) ||
+    (typeof docStats.file_name === "string" && docStats.file_name) ||
+    "Scénario sans nom";
   return (
     <div className="space-y-2">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold text-ccm-ink">
+      <header className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-white px-6 py-7 shadow-sm">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-ccm-red/10 blur-3xl" />
+        <div className="pointer-events-none absolute -left-10 -bottom-10 h-32 w-32 rounded-full bg-ccm-gold/10 blur-3xl" />
+        <div className="relative flex flex-col gap-2">
+          <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-ccm-red">
+            <span className="h-1.5 w-6 rounded-full bg-ccm-red" />
+            Rapport d'analyse
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-ccm-ink sm:text-3xl">
             Résultats de l'analyse
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Scenario ID :{" "}
-            <span className="font-mono text-slate-700">
-              {fallback(scenarioId ?? analysis.scenario_id)}
-            </span>
+          <p className="mt-1 flex items-center gap-2 text-sm text-slate-600">
+            <FileText className="h-4 w-4 text-slate-400" />
+            <span className="font-medium text-slate-800">{scenarioName}</span>
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge className={cn(riskColor(risk), "text-sm px-3 py-1")}>
-            Risque : {formatRiskLabel(risk)}
-          </Badge>
-          <Button onClick={onDownload} variant="outline">
-            <Download className="h-4 w-4" />
-            Télécharger PDF
-          </Button>
         </div>
       </header>
     </div>
@@ -1021,136 +1308,49 @@ function SummarySection({ analysis }: { analysis: Analysis }) {
   );
 }
 
-function DocumentStatsTable({ analysis }: { analysis: Analysis }) {
-  const stats = analysis.document_stats ?? {};
-  const rows: Array<[string, unknown]> = [
-    ["Nom du fichier original", stats.original_filename],
-    ["Nom stocké", stats.file_name],
-    ["Nombre de mots", stats.words_count ?? stats.word_count],
-    ["Nombre de segments", stats.chunks_count ?? stats.chunk_count],
-    [
-      "Caractères extraits",
-      (stats as Record<string, unknown>).raw_characters_count,
-    ],
-    [
-      "Caractères nettoyés",
-      (stats as Record<string, unknown>).cleaned_characters_count,
-    ],
-  ].filter(([, v]) => v !== undefined && v !== null && v !== "") as Array<
-    [string, unknown]
-  >;
+type RiskBucket = "low" | "medium" | "high" | "very_high";
 
-  if (rows.length === 0) return null;
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Statistiques du document</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TBody>
-            {rows.map(([label, value]) => (
-              <Tr key={label}>
-                <Td className="font-medium text-slate-600 w-1/2">{label}</Td>
-                <Td className="text-slate-900">{String(value)}</Td>
-              </Tr>
-            ))}
-          </TBody>
-        </Table>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ScoreTable({ analysis }: { analysis: Analysis }) {
-  const similarity = Number(
-    analysis.plagiarism?.global_similarity_score ??
-      analysis.plagiarism?.score ??
-      0
-  );
-  const profanity = Number(analysis.profanity?.profanity_score ?? 0);
-  const adult = Number(analysis.adult_content?.adult_content_score ?? 0);
-
-  const rows = [
-    {
-      label: "Similarité globale",
-      score: formatScore(similarity, "%"),
-      raw: similarity <= 1 ? similarity * 100 : similarity,
-      threshold: "≥ 75% → HIGH · ≥ 40% → MEDIUM",
-      flag:
-        similarity >= 0.75 || similarity >= 75
-          ? "high"
-          : similarity >= 0.4 || similarity >= 40
-            ? "medium"
-            : "low",
-    },
-    {
-      label: "Vulgarité",
-      score: `${profanity.toFixed(2)} / 100`,
-      raw: profanity,
-      threshold: "> 60 → HIGH · > 20 → MEDIUM",
-      flag: profanity > 60 ? "high" : profanity > 20 ? "medium" : profanity > 0 ? "low" : "low",
-    },
-    {
-      label: "Contenu adulte",
-      score: `${adult.toFixed(2)} / 100`,
-      raw: adult,
-      threshold: "> 60 → HIGH · > 20 → MEDIUM",
-      flag: adult > 60 ? "high" : adult > 20 ? "medium" : adult > 0 ? "low" : "low",
-    },
-  ];
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Scores</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <THead>
-            <Tr>
-              <Th>Indicateur</Th>
-              <Th>Score</Th>
-              <Th className="hidden md:table-cell">Seuils</Th>
-              <Th>Statut</Th>
-            </Tr>
-          </THead>
-          <TBody>
-            {rows.map((r) => (
-              <Tr key={r.label}>
-                <Td className="font-medium text-slate-800">{r.label}</Td>
-                <Td className="font-mono text-slate-900">{r.score}</Td>
-                <Td className="hidden md:table-cell text-xs text-slate-500">
-                  {r.threshold}
-                </Td>
-                <Td>
-                  <Badge className={riskColor(r.flag)}>
-                    {r.flag.toUpperCase()}
-                  </Badge>
-                </Td>
-              </Tr>
-            ))}
-          </TBody>
-        </Table>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ScoreBar({ value }: { value: number }) {
+function ScoreBar({
+  value,
+  riskOverride,
+}: {
+  value: number;
+  // Quand le backend fournit déjà une classification de risque (cf.
+  // backend/utils/composite_scoring.py:risk_from_composite), on l'utilise
+  // tel quel au lieu de re-deriver depuis le pourcentage. Évite que deux
+  // scénarios sans aucun chevauchement lexical soient affichés "ÉLEVÉ"
+  // juste parce que le cosine brut est ~85% (signature de domaine).
+  riskOverride?: RiskBucket | string | null;
+}) {
   const pct = Math.max(
     0,
     Math.min(100, value <= 1 ? value * 100 : value)
   );
+  const bucket: RiskBucket =
+    riskOverride === "very_high" ||
+    riskOverride === "high" ||
+    riskOverride === "medium" ||
+    riskOverride === "low"
+      ? (riskOverride as RiskBucket)
+      : pct >= 75
+        ? "very_high"
+        : pct >= 40
+          ? "medium"
+          : "low";
   const color =
-    pct >= 75
+    bucket === "very_high" || bucket === "high"
       ? "bg-red-500"
-      : pct >= 40
+      : bucket === "medium"
         ? "bg-amber-500"
         : "bg-emerald-500";
   const label =
-    pct >= 75 ? "ÉLEVÉ" : pct >= 40 ? "MODÉRÉ" : "FAIBLE";
+    bucket === "very_high" || bucket === "high"
+      ? "ÉLEVÉ"
+      : bucket === "medium"
+        ? "MODÉRÉ"
+        : "FAIBLE";
+  const isHigh = bucket === "very_high" || bucket === "high";
+  const isMed = bucket === "medium";
   return (
     <div className="flex items-center gap-2 min-w-[180px]">
       <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
@@ -1160,16 +1360,14 @@ function ScoreBar({ value }: { value: number }) {
         />
       </div>
       <span className="font-mono font-semibold text-sm tabular-nums text-slate-800">
-        {pct.toFixed(2)}%
+        {Math.round(pct)}%
       </span>
       <Badge
         className={cn(
           "text-[10px]",
-          pct >= 75 && "bg-red-100 text-red-700 border-red-200",
-          pct >= 40 &&
-            pct < 75 &&
-            "bg-amber-100 text-amber-700 border-amber-200",
-          pct < 40 && "bg-emerald-100 text-emerald-700 border-emerald-200"
+          isHigh && "bg-red-100 text-red-700 border-red-200",
+          isMed && "bg-amber-100 text-amber-700 border-amber-200",
+          !isHigh && !isMed && "bg-emerald-100 text-emerald-700 border-emerald-200"
         )}
       >
         {label}
@@ -1189,8 +1387,11 @@ function HighlightedExtract({
   expanded: boolean;
   previewChars?: number;
 }) {
-  const cleanText = (text || "").replace(/\s+/g, " ").trim();
-  const cleanHighlight = (highlight || "").replace(/\s+/g, " ").trim();
+  // NFKC : convertit les Arabic Presentation Forms (FExx) en caracteres
+  // arabes standard et reassemble les ligatures, sinon les PDFs marocains
+  // s'affichent en caracteres "decomposes" illisibles.
+  const cleanText = (text || "").normalize("NFKC").replace(/\s+/g, " ").trim();
+  const cleanHighlight = (highlight || "").normalize("NFKC").replace(/\s+/g, " ").trim();
 
   if (!cleanText) return <span className="text-slate-400">non disponible</span>;
 
@@ -1204,7 +1405,11 @@ function HighlightedExtract({
       expanded || cleanText.length <= previewChars
         ? cleanText
         : `${cleanText.slice(0, previewChars).trimEnd()}…`;
-    return <span dir="auto">{display}</span>;
+    return (
+      <span dir="auto" style={{ unicodeBidi: "plaintext" }}>
+        {display}
+      </span>
+    );
   }
 
   // Window selection for non-expanded view: centre on the highlight.
@@ -1227,7 +1432,7 @@ function HighlightedExtract({
   const after = cleanText.slice(idx + cleanHighlight.length, windowEnd);
 
   return (
-    <span dir="auto">
+    <span dir="auto" style={{ unicodeBidi: "plaintext" }}>
       {windowStart > 0 && <span className="text-slate-400">… </span>}
       {before}
       <mark className="bg-amber-200 text-amber-900 px-0.5 rounded font-medium">
@@ -1264,6 +1469,30 @@ function formatMatchPosition(m: PlagiarismMatch): {
   return { current, source };
 }
 
+// Le score "publiable" d'un match est le composite calculé côté backend
+// (cf. backend/utils/composite_scoring.py:compute_composite_scores). Il
+// applique des pénalités quand le cosine brut est élevé sans chevauchement
+// textuel réel — typique des deux scénarios français qui partagent le
+// vocabulaire de mise en forme (INT./EXT./JOUR/CUT TO/noms en CAPS) sans
+// avoir copié quoi que ce soit. On retombe sur le cosine brut uniquement
+// pour les anciens résultats stockés avant l'ajout du composite.
+function matchDisplayScore(match: PlagiarismMatch): number {
+  if (typeof match.final_score === "number") return match.final_score;
+  if (typeof match.display_score === "number") return match.display_score / 100;
+  return Number(
+    match.similarity_score ?? match.similarity ?? match.score ?? 0
+  );
+}
+
+function matchRiskBucket(match: PlagiarismMatch): string | null {
+  // ``is_false_positive`` est posé par is_likely_false_positive(): même si
+  // le composite n'est pas tombé en dessous du seuil "low", on refuse
+  // d'afficher "ÉLEVÉ" sur un signal que le backend a explicitement
+  // marqué comme faux positif.
+  if (match.is_false_positive) return "low";
+  return match.risk ?? null;
+}
+
 function PlagiarismMatchCard({
   match,
   index,
@@ -1282,9 +1511,8 @@ function PlagiarismMatchCard({
   );
   const currentChunk = String(match.chunk_text ?? "");
   const overlap = match.overlap_text ?? match.snippet ?? null;
-  const score = Number(
-    match.similarity_score ?? match.similarity ?? match.score ?? 0
-  );
+  const score = matchDisplayScore(match);
+  const riskBucket = matchRiskBucket(match);
   const { current, source } = formatMatchPosition(match);
   const isLong = extract.length > 400;
 
@@ -1305,7 +1533,7 @@ function PlagiarismMatchCard({
             </Badge>
           )}
         </div>
-        <ScoreBar value={score} />
+        <ScoreBar value={score} riskOverride={riskBucket} />
       </div>
 
       {/* Highlighted extract */}
@@ -1341,28 +1569,18 @@ function PlagiarismMatchCard({
 
       {/* Side-by-side comparison */}
       {compare && currentChunk && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-          <div className="rounded-md border border-blue-200 bg-blue-50/50 p-3">
-            <p className="text-[10px] uppercase tracking-wide font-semibold text-blue-700 mb-2">
-              Dans votre document ({current})
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+          <div className="rounded-md border border-blue-200 bg-blue-50/40 p-4">
+            <p className="text-[10px] uppercase tracking-wide font-semibold text-blue-700 mb-3 border-b border-blue-200 pb-2">
+              Dans votre document — {current}
             </p>
-            <p
-              className="text-slate-800 leading-relaxed whitespace-pre-wrap"
-              dir="auto"
-            >
-              {currentChunk}
-            </p>
+            <BilingualBlock text={currentChunk} tone="blue" />
           </div>
-          <div className="rounded-md border border-amber-200 bg-amber-50/50 p-3">
-            <p className="text-[10px] uppercase tracking-wide font-semibold text-amber-800 mb-2">
-              Dans le document source ({source})
+          <div className="rounded-md border border-amber-200 bg-amber-50/40 p-4">
+            <p className="text-[10px] uppercase tracking-wide font-semibold text-amber-800 mb-3 border-b border-amber-200 pb-2">
+              Dans le document source — {source}
             </p>
-            <p
-              className="text-slate-800 leading-relaxed whitespace-pre-wrap"
-              dir="auto"
-            >
-              {extract}
-            </p>
+            <BilingualBlock text={extract} tone="amber" />
           </div>
         </div>
       )}
@@ -1377,15 +1595,37 @@ function PlagiarismMatchesTable({
   matches: PlagiarismMatch[];
   startIndex?: number;
 }) {
+  // Masque les matches que le backend a explicitement marqués comme faux
+  // positifs (cosine élevé mais zéro chevauchement lexical / dialogue /
+  // named entity). Ils sont comptabilisés dans le bandeau ci-dessous pour
+  // que l'utilisateur sache qu'ils existent, sans polluer la lecture.
+  const filtered = matches.filter((m) => !m.is_false_positive);
+  const hidden = matches.length - filtered.length;
   return (
     <div className="space-y-3">
-      {matches.map((m, i) => (
+      {filtered.map((m, i) => (
         <PlagiarismMatchCard
           key={i}
           match={m}
           index={startIndex + i}
         />
       ))}
+      {filtered.length === 0 && hidden > 0 && (
+        <p className="text-xs italic text-slate-500">
+          Aucun passage de plagiat probant. {hidden} signal
+          {hidden > 1 ? "aux" : ""} faible
+          {hidden > 1 ? "s" : ""} masqué
+          {hidden > 1 ? "s" : ""} (similarité sémantique générique sans
+          chevauchement textuel).
+        </p>
+      )}
+      {filtered.length > 0 && hidden > 0 && (
+        <p className="text-xs italic text-slate-500">
+          +{hidden} signal{hidden > 1 ? "aux" : ""} faible
+          {hidden > 1 ? "s" : ""} masqué{hidden > 1 ? "s" : ""} (faux
+          positifs probables).
+        </p>
+      )}
     </div>
   );
 }
@@ -1398,9 +1638,26 @@ function PlagiarismSourceCard({
   index: number;
 }) {
   const matches = source.matches ?? [];
+  // Comptes / score "réels" calculés après filtrage des faux positifs : si
+  // les 5 matches du groupe sont marqués FP, on n'affiche pas "Meilleur
+  // score 85%" en rouge. Le best_score du backend est conservé en fallback
+  // pour les anciennes analyses sans le champ ``is_false_positive``.
+  const realMatches = matches.filter((m) => !m.is_false_positive);
+  const realBest = realMatches.reduce(
+    (acc, m) => Math.max(acc, matchDisplayScore(m)),
+    0
+  );
+  const bestRisk: RiskBucket =
+    realBest >= 0.75 ? "very_high"
+    : realBest >= 0.55 ? "high"
+    : realBest >= 0.30 ? "medium"
+    : "low";
   const totalCount = source.matches_count ?? matches.length;
   const displayedCount = source.displayed_matches_count ?? matches.length;
-  const bestScore = formatScore(source.best_score ?? 0, "%");
+  const bestScore = formatScore(
+    realMatches.length > 0 ? realBest : source.best_score ?? 0,
+    "%"
+  );
   const moreCount = Math.max(0, totalCount - displayedCount);
 
   return (
@@ -1432,7 +1689,7 @@ function PlagiarismSourceCard({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Badge className={cn(riskColor("high"), "font-mono")}>
+            <Badge className={cn(riskColor(bestRisk), "font-mono")}>
               Meilleur score : {bestScore}
             </Badge>
             <Badge className="bg-slate-100 text-slate-700 border-slate-200">
@@ -1554,7 +1811,7 @@ function PlagiarismSection({ plagiarism }: { plagiarism: Plagiarism }) {
           </CardTitle>
         </CardHeader>
         <CardContent className="relative">
-          <Alert variant="info">
+          <Alert variant="success">
             Aucun passage similaire significatif n'a été détecté.
           </Alert>
         </CardContent>
@@ -1627,7 +1884,7 @@ function PlagiarismSection({ plagiarism }: { plagiarism: Plagiarism }) {
             </span>
           </div>
         ) : (
-          <Alert variant="info">
+          <Alert variant="success">
             Aucun passage similaire partiel significatif n'a été détecté.
           </Alert>
         )}
@@ -1687,17 +1944,68 @@ function ModerationSection({ analysis }: { analysis: Analysis }) {
   const profPct = profanityScore <= 1 ? profanityScore * 100 : profanityScore;
   const adultPct = adultScore <= 1 ? adultScore * 100 : adultScore;
 
+  // The headline visual of the moderation card adapts to the worst of the
+  // two scores. A low/clean moderation reads as green, a borderline one as
+  // amber, a flagged one as the CCM red. Without this the icon and halos
+  // stayed red even on perfectly clean scenarios.
+  const modPct = Math.max(profPct, adultPct);
+  const modTone: "low" | "medium" | "high" =
+    modPct >= 60 ? "high" : modPct >= 20 ? "medium" : "low";
+  const modVisual = {
+    low: {
+      glowA: "bg-emerald-300/15",
+      glowB: "bg-emerald-200/15",
+      iconWrap:
+        "bg-gradient-to-br from-emerald-400 via-emerald-500 to-emerald-600 shadow-emerald-500/30",
+      ring: "ring-emerald-300/40",
+    },
+    medium: {
+      glowA: "bg-amber-300/20",
+      glowB: "bg-amber-200/15",
+      iconWrap:
+        "bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 shadow-amber-500/30",
+      ring: "ring-amber-300/40",
+    },
+    high: {
+      glowA: "bg-ccm-red/10",
+      glowB: "bg-rose-300/15",
+      iconWrap:
+        "bg-gradient-to-br from-ccm-red-light via-ccm-red to-ccm-red-dark shadow-ccm-red/30",
+      ring: "ring-ccm-gold/30",
+    },
+  }[modTone];
+
   return (
     <Card className="relative overflow-hidden border-slate-200">
-      {/* CCM-aligned glows */}
-      <div className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-ccm-red/10 blur-3xl" />
-      <div className="pointer-events-none absolute -left-20 -bottom-20 h-40 w-40 rounded-full bg-rose-300/15 blur-3xl" />
+      {/* Tone-adaptive ambient glows */}
+      <div
+        className={cn(
+          "pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full blur-3xl transition-colors",
+          modVisual.glowA
+        )}
+      />
+      <div
+        className={cn(
+          "pointer-events-none absolute -left-20 -bottom-20 h-40 w-40 rounded-full blur-3xl transition-colors",
+          modVisual.glowB
+        )}
+      />
 
       <CardHeader className="relative">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <CardTitle className="flex items-center gap-2.5">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-ccm-red-light via-ccm-red to-ccm-red-dark text-white shadow-md shadow-ccm-red/30 ring-1 ring-ccm-gold/30">
-              <ShieldAlert className="h-4 w-4" />
+            <span
+              className={cn(
+                "inline-flex h-9 w-9 items-center justify-center rounded-lg text-white shadow-md ring-1 transition-colors",
+                modVisual.iconWrap,
+                modVisual.ring
+              )}
+            >
+              {modTone === "low" ? (
+                <ShieldCheck className="h-4 w-4" />
+              ) : (
+                <ShieldAlert className="h-4 w-4" />
+              )}
             </span>
             <span>
               Analyse modération
@@ -1743,21 +2051,23 @@ function ModerationSection({ analysis }: { analysis: Analysis }) {
         </div>
       </CardHeader>
       <CardContent className="relative space-y-6">
-        {/* Vulgarité — Résumé groupé */}
+        {/* Vulgarité — Résumé groupé. The "Résumé des mots détectés"
+            heading only makes sense when there *is* something to list;
+            otherwise we just show the success notice on its own. */}
         <div>
-          <div className="mb-2 flex items-center gap-2 border-l-4 border-ccm-red/40 pl-3">
-            <h3 className="text-sm font-semibold text-ccm-ink">
-              Résumé des mots détectés
-            </h3>
-            {grouped.length > 0 && (
+          {grouped.length > 0 && (
+            <div className="mb-2 flex items-center gap-2 border-l-4 border-ccm-red/40 pl-3">
+              <h3 className="text-sm font-semibold text-ccm-ink">
+                Résumé des mots détectés
+              </h3>
               <span className="text-xs text-slate-500">
                 {grouped.length} mot{grouped.length > 1 ? "s" : ""} unique
                 {grouped.length > 1 ? "s" : ""}
               </span>
-            )}
-          </div>
+            </div>
+          )}
           {grouped.length === 0 ? (
-            <Alert variant="info">
+            <Alert variant="success">
               Aucune vulgarité significative n'a été détectée.
             </Alert>
           ) : (
@@ -1876,394 +2186,16 @@ function ModerationSection({ analysis }: { analysis: Analysis }) {
           </div>
         )}
       </CardContent>
-      <div className="h-1 bg-gradient-to-r from-ccm-red via-rose-500 to-ccm-gold opacity-70" />
-    </Card>
-  );
-}
-
-// ---------- Formatted RAG report renderer ----------
-
-type ParsedReport = {
-  scenarioId: string | null;
-  riskLevel: string | null;
-  sections: { title: string; body: string }[];
-};
-
-const KNOWN_SECTION_TITLES = [
-  "Résumé",
-  "Statistiques du document",
-  "Analyse plagiat",
-  "Analyse modération",
-  "Recommandations",
-  "Conclusion",
-];
-
-const SECTION_ICONS: Record<string, typeof FileText> = {
-  "Résumé": FileText,
-  "Statistiques du document": BarChart3,
-  "Analyse plagiat": Search,
-  "Analyse modération": ShieldAlert,
-  "Recommandations": ListChecks,
-  "Conclusion": Target,
-};
-
-function parseGeneratedReport(text: string): ParsedReport {
-  const lines = text.split("\n");
-  let scenarioId: string | null = null;
-  let riskLevel: string | null = null;
-  const sections: { title: string; body: string }[] = [];
-  let current: { title: string; body: string } | null = null;
-
-  for (const rawLine of lines) {
-    const line = rawLine.replace(/\s+$/, "");
-    const trimmed = line.trim();
-
-    if (trimmed.startsWith("Rapport d'analyse du scénario")) {
-      scenarioId = trimmed.replace("Rapport d'analyse du scénario", "").trim();
-      continue;
-    }
-    if (trimmed.startsWith("Niveau de risque")) {
-      const parts = trimmed.split(":");
-      if (parts.length > 1) riskLevel = parts.slice(1).join(":").trim();
-      continue;
-    }
-    if (KNOWN_SECTION_TITLES.includes(trimmed)) {
-      if (current) sections.push(current);
-      current = { title: trimmed, body: "" };
-      continue;
-    }
-    if (current) {
-      current.body = current.body ? `${current.body}\n${line}` : line;
-    }
-  }
-  if (current) sections.push(current);
-  return { scenarioId, riskLevel, sections };
-}
-
-function ReportBulletList({ body }: { body: string }) {
-  const items = body
-    .split("\n")
-    .map((l) => l.replace(/^\s*[-•]\s+/, "").trim())
-    .filter(Boolean);
-  if (items.length === 0)
-    return <p className="text-sm text-slate-500 italic">(aucun élément)</p>;
-  return (
-    <ul className="space-y-1.5">
-      {items.map((item, i) => (
-        <li
-          key={i}
-          className="flex gap-2 text-sm text-slate-700 leading-relaxed"
-        >
-          <span className="text-ccm-red shrink-0 mt-0.5">•</span>
-          <span dir="auto">{item}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function ReportNumberedList({ body }: { body: string }) {
-  const items = body
-    .split("\n")
-    .map((l) => l.replace(/^\s*[-•]\s+/, "").trim())
-    .filter(Boolean);
-  if (items.length === 0)
-    return <p className="text-sm text-slate-500 italic">(aucun élément)</p>;
-  return (
-    <ol className="space-y-2">
-      {items.map((item, i) => (
-        <li
-          key={i}
-          className="flex gap-3 text-sm text-slate-700 leading-relaxed"
-        >
-          <span className="inline-flex shrink-0 h-5 w-5 items-center justify-center rounded-full bg-ccm-red/10 text-ccm-red font-mono text-[11px] font-semibold mt-0.5">
-            {i + 1}
-          </span>
-          <span dir="auto">{item}</span>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-function ReportKeyValueList({ body }: { body: string }) {
-  const items = body
-    .split("\n")
-    .map((l) => l.replace(/^\s*[-•]\s+/, "").trim())
-    .filter(Boolean);
-  if (items.length === 0)
-    return <p className="text-sm text-slate-500 italic">(aucun élément)</p>;
-  return (
-    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
-      {items.map((item, i) => {
-        const idx = item.indexOf(":");
-        if (idx < 0) {
-          return (
-            <div key={i} className="col-span-full text-slate-700" dir="auto">
-              {item}
-            </div>
-          );
-        }
-        const label = item.slice(0, idx).trim();
-        const value = item.slice(idx + 1).trim();
-        return (
-          <div key={i} className="flex flex-col gap-0.5">
-            <dt className="text-[11px] uppercase tracking-wide text-slate-500">
-              {label}
-            </dt>
-            <dd
-              className="font-mono text-slate-900 text-sm break-all"
-              dir="auto"
-            >
-              {value}
-            </dd>
-          </div>
-        );
-      })}
-    </dl>
-  );
-}
-
-function ReportPlagiarismBlock({ body }: { body: string }) {
-  // Body shape: a headline paragraph, then optional "Match N" blocks
-  // followed by indented "    label : value" lines.
-  const lines = body.split("\n");
-  const blocks: string[][] = [];
-  let head: string[] = [];
-  let current: string[] | null = null;
-
-  for (const rawLine of lines) {
-    const trimmed = rawLine.trim();
-    if (/^Match\s+\d+/i.test(trimmed)) {
-      if (current) blocks.push(current);
-      current = [trimmed];
-    } else if (current) {
-      current.push(rawLine);
-    } else {
-      head.push(rawLine);
-    }
-  }
-  if (current) blocks.push(current);
-
-  const headText = head.join("\n").trim();
-
-  return (
-    <div className="space-y-4">
-      {headText && (
-        <p
-          className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap"
-          dir="auto"
-        >
-          {headText}
-        </p>
-      )}
-      {blocks.length > 0 && (
-        <div className="space-y-3">
-          {blocks.map((block, i) => {
-            const title = block[0].trim();
-            const fields = block
-              .slice(1)
-              .map((l) => l.trim())
-              .filter((l) => l && l.includes(":"));
-            return (
-              <div
-                key={i}
-                className="rounded-md border border-slate-200 bg-slate-50/60 p-3"
-              >
-                <p className="font-semibold text-slate-800 text-sm mb-2 flex items-center gap-2">
-                  <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded bg-ccm-red/10 text-ccm-red font-mono text-[11px] px-1">
-                    {i + 1}
-                  </span>
-                  {title}
-                </p>
-                <dl className="grid grid-cols-1 sm:grid-cols-[10rem_1fr] gap-x-3 gap-y-1.5 text-xs">
-                  {fields.map((field, j) => {
-                    const idx = field.indexOf(":");
-                    const label = field.slice(0, idx).trim();
-                    const value = field.slice(idx + 1).trim();
-                    const isExtract = /^extrait$/i.test(label);
-                    return (
-                      <Fragment key={j}>
-                        <dt className="text-slate-500 font-medium">{label}</dt>
-                        <dd
-                          className={cn(
-                            "text-slate-800 break-words",
-                            isExtract
-                              ? "italic bg-amber-50 border border-amber-100 rounded p-2 text-slate-700"
-                              : "font-mono"
-                          )}
-                          dir="auto"
-                        >
-                          {value || "—"}
-                        </dd>
-                      </Fragment>
-                    );
-                  })}
-                </dl>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ReportParagraph({ body }: { body: string }) {
-  return (
-    <p
-      className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap"
-      dir="auto"
-    >
-      {body.trim()}
-    </p>
-  );
-}
-
-function ReportSectionBlock({ title, body }: { title: string; body: string }) {
-  const Icon = SECTION_ICONS[title] ?? FileText;
-  let content: React.ReactNode;
-  switch (title) {
-    case "Statistiques du document":
-      content = <ReportKeyValueList body={body} />;
-      break;
-    case "Recommandations":
-      content = <ReportNumberedList body={body} />;
-      break;
-    case "Analyse plagiat":
-      content = <ReportPlagiarismBlock body={body} />;
-      break;
-    case "Analyse modération":
-      content = (
-        <p
-          className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap"
-          dir="auto"
-        >
-          {body.trim()}
-        </p>
-      );
-      break;
-    default:
-      content = <ReportParagraph body={body} />;
-  }
-  return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4">
-      <h3 className="flex items-center gap-2 text-sm font-semibold text-ccm-ink uppercase tracking-wide mb-3">
-        <Icon className="h-4 w-4 text-ccm-red" />
-        {title}
-      </h3>
-      {content}
-    </section>
-  );
-}
-
-function FormattedReport({ text }: { text: string }) {
-  const parsed = useMemo(() => parseGeneratedReport(text), [text]);
-  const [copied, setCopied] = useState(false);
-  const [showRaw, setShowRaw] = useState(false);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopied(false);
-    }
-  };
-
-  const download = () => {
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `rapport_${parsed.scenarioId ?? "scenario"}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5 text-ccm-red" />
-            Rapport généré complet
-          </CardTitle>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" onClick={copy}>
-              {copied ? (
-                <ClipboardCheck className="h-4 w-4 text-emerald-600" />
-              ) : (
-                <ClipboardCopy className="h-4 w-4" />
-              )}
-              {copied ? "Copié !" : "Copier"}
-            </Button>
-            <Button variant="outline" onClick={download}>
-              <Download className="h-4 w-4" />
-              .txt
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => setShowRaw((v) => !v)}
-            >
-              {showRaw ? "Vue formatée" : "Voir texte brut"}
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {showRaw ? (
-          <pre
-            className="text-xs whitespace-pre-wrap bg-slate-50 border border-slate-200 p-4 rounded text-slate-700 leading-relaxed max-h-[600px] overflow-auto"
-            dir="auto"
-          >
-            {text}
-          </pre>
-        ) : (
-          <div className="space-y-4">
-            {/* Header card with scenario id and risk badge */}
-            <div className="rounded-lg ccm-gradient p-4 text-white">
-              <p className="text-[11px] uppercase tracking-wide text-white/70">
-                Scénario analysé
-              </p>
-              <p className="font-mono text-sm break-all">
-                {parsed.scenarioId ?? "—"}
-              </p>
-              {parsed.riskLevel && (
-                <div className="mt-3">
-                  <p className="text-[11px] uppercase tracking-wide text-white/70">
-                    Niveau de risque
-                  </p>
-                  <Badge
-                    className={cn(
-                      "mt-1 text-sm px-3 py-1 border-0",
-                      parsed.riskLevel.toUpperCase() === "HIGH" &&
-                        "bg-red-600 text-white",
-                      parsed.riskLevel.toUpperCase() === "MEDIUM" &&
-                        "bg-amber-500 text-white",
-                      parsed.riskLevel.toUpperCase() === "LOW" &&
-                        "bg-emerald-600 text-white"
-                    )}
-                  >
-                    {parsed.riskLevel}
-                  </Badge>
-                </div>
-              )}
-            </div>
-
-            {parsed.sections.map((section) => (
-              <ReportSectionBlock
-                key={section.title}
-                title={section.title}
-                body={section.body}
-              />
-            ))}
-          </div>
+      <div
+        className={cn(
+          "h-1 bg-gradient-to-r opacity-70 transition-colors",
+          modTone === "low" &&
+            "from-emerald-400 via-teal-500 to-emerald-500",
+          modTone === "medium" &&
+            "from-amber-400 via-amber-500 to-orange-500",
+          modTone === "high" && "from-ccm-red via-rose-500 to-ccm-gold"
         )}
-      </CardContent>
+      />
     </Card>
   );
 }
@@ -2327,8 +2259,11 @@ function RagErrorHint({ error }: { error: string }) {
     return (
       <p className="text-xs mt-2 text-slate-600">
         <strong>Modèle introuvable.</strong> Vérifie que{" "}
-        <code>SIA_RAG_LLM_MODEL</code> correspond à un modèle accessible avec
-        ta clé (ex. <code>gpt-4o-mini</code>, <code>gpt-4o</code>).
+        <code>SIA_RAG_LLM_MODEL</code> correspond à un modèle disponible. Sur
+        Ollama local, télécharge-le d'abord avec{" "}
+        <code>ollama pull aya-expanse:8b</code> (modèle utilisé par défaut
+        dans SIA pour le multilingue FR/AR). Tu peux lister les modèles
+        installés avec <code>ollama list</code>.
       </p>
     );
   }
@@ -2498,10 +2433,11 @@ function AdvancedRAGSection({
                 </div>
 
                 <p className="text-xs text-slate-600">
-                  Le modèle local (Ollama llama3.2:3b sur CPU) traite ton
-                  rapport. Compte environ <strong>90 à 150 secondes</strong>
-                  {" "}selon la taille du contexte. La barre est une estimation,
-                  pas une mesure exacte — ne ferme pas l'onglet.
+                  Le modèle local traite ton rapport. Le temps de traitement
+                  dépend de la <strong>taille du fichier</strong> et du{" "}
+                  <strong>matériel utilisé</strong> (CPU/GPU, RAM). La barre
+                  est une estimation, pas une mesure exacte — ne ferme pas
+                  l'onglet.
                 </p>
               </div>
             </div>
@@ -2568,7 +2504,7 @@ function AdvancedRAGSection({
                 Risque : {formatRiskLabel(report.context.risk_level)}
               </Badge>
               <Badge className="bg-slate-100 text-slate-600 border-slate-200">
-                Score : {report.context.similarity_score_pct.toFixed(2)}%
+                Score : {Math.round(report.context.similarity_score_pct)}%
               </Badge>
               <span className="text-slate-400">
                 généré le{" "}
@@ -2601,12 +2537,8 @@ function AdvancedRAGSection({
                 </div>
               )}
 
-            <div
-              className="rounded-md bg-slate-50 border border-slate-200 p-4 text-sm leading-relaxed text-slate-800 whitespace-pre-wrap"
-              dir="auto"
-            >
-              {report.narrative}
-            </div>
+            <RAGNarrative narrative={report.narrative} />
+
 
             <details className="rounded-md border border-slate-200 bg-white p-3">
               <summary className="cursor-pointer text-xs text-slate-600 font-medium">
@@ -2620,7 +2552,7 @@ function AdvancedRAGSection({
                     className="rounded border border-slate-200 p-2 space-y-1"
                   >
                     <p className="font-mono text-slate-600">
-                      #{p.rank} · {p.score_pct.toFixed(2)}% ·{" "}
+                      #{p.rank} · {Math.round(p.score_pct)}% ·{" "}
                       {p.source_filename} · {p.current_position} ↔{" "}
                       {p.source_position}
                       {p.grouped_copies > 1 && ` · ×${p.grouped_copies}`}
@@ -2880,15 +2812,15 @@ function MoroccanConstantsSection({
             <div className="flex items-center gap-3">
               <Landmark className="h-6 w-6 text-ccm-ink" />
               <div>
+                <p className="text-xl font-bold text-ccm-ink">
+                  Constantes nationales — conformité
+                </p>
                 <p
-                  className="text-xl font-bold text-ccm-ink"
+                  className="text-sm text-slate-500"
                   dir="rtl"
                   lang="ar"
                 >
                   ثوابت الدولة المغربية
-                </p>
-                <p className="text-xs uppercase tracking-wider text-slate-500">
-                  Constantes nationales — conformité
                 </p>
               </div>
             </div>
@@ -3197,12 +3129,17 @@ function MoroccanMentionRow({ mention }: { mention: MoroccanMention }) {
               « {mention.subject} »
             </span>
           )}
-          {mention.chunk_index !== null &&
-            mention.chunk_index !== undefined && (
-              <Badge className="border-slate-200 bg-slate-100 text-slate-600 text-[10px]">
-                Segment #{mention.chunk_index}
-              </Badge>
-            )}
+          {mention.page_number !== null &&
+          mention.page_number !== undefined ? (
+            <Badge className="border-slate-200 bg-slate-100 text-slate-700 text-[10px]">
+              Page {mention.page_number}
+            </Badge>
+          ) : mention.chunk_index !== null &&
+            mention.chunk_index !== undefined ? (
+            <Badge className="border-slate-200 bg-slate-100 text-slate-600 text-[10px]">
+              Segment #{mention.chunk_index}
+            </Badge>
+          ) : null}
           {isFlagged ? (
             <Badge
               className={cn(
@@ -3273,11 +3210,15 @@ function MoroccanFlagRow({ flag }: { flag: MoroccanFlag }) {
             <Badge className={severityBadgeClass(flag.severity)}>
               {severityHumanLabel(flag.severity)}
             </Badge>
-            {flag.chunk_index !== null && flag.chunk_index !== undefined && (
+            {flag.page_number !== null && flag.page_number !== undefined ? (
+              <Badge className="border-slate-200 bg-slate-100 text-slate-700">
+                Page {flag.page_number}
+              </Badge>
+            ) : flag.chunk_index !== null && flag.chunk_index !== undefined ? (
               <Badge className="border-slate-200 bg-slate-100 text-slate-600">
                 Chunk #{flag.chunk_index}
               </Badge>
-            )}
+            ) : null}
           </div>
           {flag.evidence && (
             <blockquote
@@ -3293,72 +3234,6 @@ function MoroccanFlagRow({ flag }: { flag: MoroccanFlag }) {
         </div>
       </div>
     </li>
-  );
-}
-
-function SectionHeader({
-  id,
-  icon: Icon,
-  title,
-  subtitle,
-}: {
-  id: string;
-  icon: typeof FileText;
-  title: string;
-  subtitle?: string;
-}) {
-  return (
-    <div
-      id={id}
-      className="scroll-mt-24 flex items-center gap-3 border-b border-slate-200 pb-2 pt-2"
-    >
-      <div className="flex h-9 w-9 items-center justify-center rounded-md bg-ccm-red/10 text-ccm-red">
-        <Icon className="h-5 w-5" />
-      </div>
-      <div>
-        <h2 className="text-lg font-semibold text-ccm-ink">{title}</h2>
-        {subtitle && (
-          <p className="text-xs text-slate-500">{subtitle}</p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-const TOC_ITEMS: { id: string; label: string }[] = [
-  { id: "synthese", label: "Synthèse" },
-  { id: "plagiat", label: "Plagiat" },
-  { id: "moderation", label: "Modération" },
-  { id: "constantes-maroc", label: "Constantes Maroc" },
-  { id: "rapport-ia", label: "Rapport IA" },
-  { id: "recommandations", label: "Recommandations" },
-  { id: "conclusion", label: "Conclusion" },
-];
-
-function TableOfContents({
-  hiddenIds = [],
-}: {
-  hiddenIds?: string[];
-}) {
-  const items = TOC_ITEMS.filter((item) => !hiddenIds.includes(item.id));
-  return (
-    <nav
-      aria-label="Sommaire du rapport"
-      className="sticky top-2 z-10 -mx-1 mb-2 overflow-x-auto rounded-md border border-slate-200 bg-white/95 px-2 py-1.5 backdrop-blur"
-    >
-      <ul className="flex items-center gap-1 text-xs">
-        {items.map((item) => (
-          <li key={item.id}>
-            <a
-              href={`#${item.id}`}
-              className="inline-block whitespace-nowrap rounded px-2 py-1 text-slate-600 hover:bg-slate-100 hover:text-ccm-ink"
-            >
-              {item.label}
-            </a>
-          </li>
-        ))}
-      </ul>
-    </nav>
   );
 }
 
@@ -3425,9 +3300,6 @@ export function ResultsPage() {
   }
 
   const plagiarism = analysis.plagiarism ?? {};
-  const matches: PlagiarismMatch[] = Array.isArray(plagiarism.matches)
-    ? plagiarism.matches
-    : [];
   const rag = analysis.rag_report ?? {};
   const recommendations = Array.isArray(rag.recommendations)
     ? rag.recommendations
@@ -3461,22 +3333,12 @@ export function ResultsPage() {
 
   return (
     <div className="space-y-6">
-      <HeaderSection
-        analysis={analysis}
-        scenarioId={scenarioId}
-        onDownload={handleDownload}
-      />
+      <HeaderSection analysis={analysis} />
 
       <StrictMatchBanner match={analysis.strict_match} />
 
       {/* ---------- 1. Synthèse ---------- */}
-      <section className="space-y-4">
-        <SectionHeader
-          id="synthese"
-          icon={ClipboardCheck}
-          title="Synthèse"
-          subtitle="Vue d'ensemble du scénario et niveau de risque global."
-        />
+      <section id="synthese" className="space-y-4 scroll-mt-4">
         <StatusCards analysis={analysis} />
         <SummarySection analysis={analysis} />
       </section>

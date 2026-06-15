@@ -32,3 +32,8 @@ Thumbs.db
 
 # Local agent / claude scratch
 .claude/
+
+# GitLab Runner (token d'auth dedans — ne jamais commiter)
+config.toml
+builds/
+.gitlab-runner/

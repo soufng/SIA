@@ -341,7 +341,7 @@ class AnalysisRepository:
 
     def _build_statistics(self, documents: list[dict[str, Any]]) -> dict[str, Any]:
         """Build aggregate analytics from normalized analysis documents."""
-        risk_counts = {"low": 0, "medium": 0, "high": 0}
+        risk_counts = {"low": 0, "medium": 0, "high": 0, "very_high": 0}
         analyses_by_date: dict[str, int] = {}
         similarity_values: list[float] = []
         profanity_values: list[float] = []
@@ -360,7 +360,12 @@ class AnalysisRepository:
             )
             risk = str(
                 self._get_nested(document, "rag_report", "risk_level") or "unknown"
-            ).lower()
+            ).lower().strip()
+            # Normalize the French/English variants of the very-high tier
+            # introduced by the composite-scoring pipeline so the histogram
+            # below sees a single canonical token.
+            if risk in {"tres_eleve", "tres eleve", "très élevé"}:
+                risk = "very_high"
             date_key = self._date_key(document.get("analysis_timestamp"))
 
             similarity_values.append(similarity)
@@ -373,12 +378,45 @@ class AnalysisRepository:
             if date_key:
                 analyses_by_date[date_key] = analyses_by_date.get(date_key, 0) + 1
 
-            if risk in {"medium", "high"}:
+            # Per-dimension flags. A scenario must be surfaced if ANY of the
+            # three priority axes (exact duplicate, moroccan constants,
+            # plagiarism similarity) is flagged high or very high.
+            plagiarism_risk = self._normalize_risk(
+                self._get_nested(document, "plagiarism", "risk")
+            )
+            exact_duplicate = bool(
+                self._get_nested(document, "plagiarism", "exact_duplicate")
+                or self._get_nested(document, "plagiarism", "duplicate")
+            )
+            moroccan_risk = self._normalize_risk(
+                self._get_nested(document, "moroccan_constants", "risk_level")
+            )
+
+            plagiarism_flagged = plagiarism_risk in {"high", "very_high"}
+            moroccan_flagged = moroccan_risk in {"high", "very_high"}
+            if exact_duplicate or plagiarism_flagged or moroccan_flagged:
+                source = self._extract_matched_source(document)
+                # Priority order for the headline badge: exact duplicate
+                # trumps everything, then moroccan constants (compliance),
+                # then plagiarism similarity.
+                if exact_duplicate:
+                    primary = "exact_duplicate"
+                elif moroccan_flagged:
+                    primary = "moroccan_constants"
+                else:
+                    primary = "plagiarism"
                 risky_rows.append(
                     {
                         "scenario_id": document.get("scenario_id", ""),
+                        "original_filename": self._extract_filename(document),
+                        "matched_filename": source["filename"],
+                        "matched_scenario_id": source["scenario_id"],
                         "analysis_timestamp": document.get("analysis_timestamp"),
                         "risk_level": risk,
+                        "primary_signal": primary,
+                        "plagiarism_risk": plagiarism_risk,
+                        "moroccan_risk": moroccan_risk,
+                        "exact_duplicate": exact_duplicate,
                         "similarity_score": similarity,
                         "profanity_score": profanity,
                         "adult_content_score": adult,
@@ -387,34 +425,43 @@ class AnalysisRepository:
                     }
                 )
 
-        top_similar = sorted(
-            (
-                {
-                    "scenario_id": document.get("scenario_id", ""),
-                    "analysis_timestamp": document.get("analysis_timestamp"),
-                    "similarity_score": self._to_float(
-                        self._get_nested(
-                            document,
-                            "plagiarism",
-                            "global_similarity_score",
-                        )
-                    ),
-                    "risk_level": self._get_nested(
-                        document,
-                        "rag_report",
-                        "risk_level",
+        def _top_entry(doc: dict[str, Any]) -> dict[str, Any]:
+            source = self._extract_matched_source(doc)
+            return {
+                "scenario_id": doc.get("scenario_id", ""),
+                "original_filename": self._extract_filename(doc),
+                "matched_filename": source["filename"],
+                "matched_scenario_id": source["scenario_id"],
+                "analysis_timestamp": doc.get("analysis_timestamp"),
+                "similarity_score": self._to_float(
+                    self._get_nested(
+                        doc, "plagiarism", "global_similarity_score"
                     )
-                    or "unknown",
-                }
-                for document in documents
-            ),
+                ),
+                "risk_level": self._get_nested(
+                    doc, "rag_report", "risk_level"
+                )
+                or "unknown",
+            }
+
+        top_similar = sorted(
+            (_top_entry(document) for document in documents),
             key=lambda item: item["similarity_score"],
             reverse=True,
         )[:10]
 
+        _risk_order = {"very_high": 3, "high": 2, "medium": 1}
+        # Exact duplicate is the most severe finding (literal copy), then
+        # we rank by the highest of plagiarism/moroccan/global risks, and
+        # finally by the raw similarity to break ties.
         risky_rows.sort(
             key=lambda item: (
-                item["risk_level"] == "high",
+                1 if item.get("exact_duplicate") else 0,
+                max(
+                    _risk_order.get(item.get("plagiarism_risk", "low"), 0),
+                    _risk_order.get(item.get("moroccan_risk", "low"), 0),
+                    _risk_order.get(item.get("risk_level", "low"), 0),
+                ),
                 item["similarity_score"],
                 item["profanity_score"],
                 item["adult_content_score"],
@@ -462,6 +509,96 @@ class AnalysisRepository:
                 return None
             current = current.get(key)
         return current
+
+    def _normalize_risk(self, value: Any) -> str:
+        """Map any risk-level string variant to the canonical English token.
+
+        Accepts the French scale (faible/moyen/élevé/très élevé) and the
+        English one (low/medium/high/very_high), returning a lowercase
+        English token. Unknown values become ``"unknown"``.
+        """
+        if not value:
+            return "unknown"
+        key = str(value).lower().strip()
+        if key in {"very_high", "veryhigh", "tres_eleve", "tres eleve", "très élevé"}:
+            return "very_high"
+        if key in {"high", "eleve", "élevé"}:
+            return "high"
+        if key in {"medium", "moyen"}:
+            return "medium"
+        if key in {"low", "faible"}:
+            return "low"
+        return "unknown"
+
+    def _extract_filename(self, document: dict[str, Any]) -> str:
+        """Return the original PDF filename stored alongside the analysis.
+
+        Checks the same fallback chain the frontend uses so the displayed
+        name stays consistent between History and Analytics pages.
+        """
+        for candidate in (
+            self._get_nested(document, "document_stats", "original_filename"),
+            document.get("original_filename"),
+            document.get("filename"),
+            self._get_nested(document, "document_stats", "file_name"),
+        ):
+            if candidate:
+                return str(candidate)
+        return ""
+
+    def _extract_matched_source(self, document: dict[str, Any]) -> dict[str, str]:
+        """Return ``(filename, scenario_id)`` of the top plagiarism source.
+
+        Picks the highest-scoring source from the ``plagiarism.sources`` or
+        ``plagiarism.matches`` arrays. Returns empty strings when no match
+        is recorded (e.g. low-risk analyses without any flagged source).
+        """
+        plagiarism = document.get("plagiarism") or {}
+        if not isinstance(plagiarism, dict):
+            return {"filename": "", "scenario_id": ""}
+
+        # 1. Prefer ``plagiarism_sources``: already grouped by source and
+        # sorted by best_score descending in the pipeline.
+        sources = plagiarism.get("plagiarism_sources") or plagiarism.get("sources")
+        if isinstance(sources, list):
+            for source in sources:
+                if not isinstance(source, dict):
+                    continue
+                name = (
+                    source.get("original_filename")
+                    or source.get("stored_filename")
+                    or ""
+                )
+                sid = source.get("source_scenario_id") or ""
+                if name or sid:
+                    return {"filename": str(name), "scenario_id": str(sid)}
+
+        # 2. Fall back to the flat match list and pick the best score.
+        matches = plagiarism.get("matches")
+        if isinstance(matches, list):
+            best: dict[str, Any] | None = None
+            best_score = -1.0
+            for match in matches:
+                if not isinstance(match, dict):
+                    continue
+                score = self._to_float(
+                    match.get("final_score")
+                    or match.get("similarity_score")
+                    or match.get("score")
+                )
+                if score > best_score:
+                    best_score = score
+                    best = match
+            if best is not None:
+                return {
+                    "filename": str(
+                        best.get("original_filename")
+                        or best.get("stored_filename")
+                        or ""
+                    ),
+                    "scenario_id": str(best.get("matched_scenario_id") or ""),
+                }
+        return {"filename": "", "scenario_id": ""}
 
     def _to_float(self, value: Any) -> float:
         """Convert numeric-like values to float."""

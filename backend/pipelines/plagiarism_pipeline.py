@@ -19,6 +19,7 @@ import logging
 import re
 from dataclasses import dataclass
 from functools import cmp_to_key
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from backend.core.config import settings
@@ -27,6 +28,9 @@ from backend.services.local_similarity_service import LocalSimilarityService
 from backend.services.plagiarism_service import PlagiarismService
 from backend.services.strict_similarity_service import StrictSimilarityService
 from backend.services.vector_service import VectorService
+from backend.utils.composite_scoring import (
+    format_percent,
+)
 
 
 if TYPE_CHECKING:
@@ -166,12 +170,15 @@ class PlagiarismPipeline:
             return
         try:
             embeddings = self.embedding_service.generate_embeddings(document.chunks)
+            stored_filename = Path(document.file_path).name if document.file_path else None
             self.vector_service.upsert_chunks(
                 scenario_id=document.scenario_id,
                 chunks=document.chunks,
                 embeddings=embeddings,
                 display_chunks=document.display_chunks,
                 chunk_metadata=document.chunk_metadata,
+                original_filename=document.original_filename,
+                stored_filename=stored_filename,
             )
         except Exception as exc:
             error_message = _root_error_message(exc)
@@ -231,11 +238,33 @@ class PlagiarismPipeline:
         raw_matches = [self._ensure_match_quality(match) for match in raw_matches]
         aggregation = self._aggregate_matches(raw_matches)
 
-        risk = str(
-            local_result.get("risk") or self._risk_from_score(final_score)
-        ).lower()
-        if self._risk_from_score(final_score) == "high":
-            risk = "high"
+        # The overall similarity score must be derived from the *composite*
+        # final_score of the kept matches, not from the raw embedding average
+        # which is what ``vector_result["global_similarity_score"]`` carries.
+        best_composite = max(
+            (self._match_score(m) for m in aggregation["matches"]),
+            default=0.0,
+        )
+        # An exact local duplicate always trumps the composite score.
+        if local_exact_duplicate:
+            best_composite = max(best_composite, 1.0)
+        else:
+            best_composite = max(best_composite, local_score)
+        final_score = best_composite
+
+        # Risk floor based on lexical evidence. A HIGH or VERY_HIGH bucket
+        # cannot be reached purely on a semantic score — there must be at
+        # least one match carrying real lexical / n-gram overlap.
+        has_real_overlap = any(
+            self._match_lexical(m) >= 0.20
+            or self._match_exact_overlap(m) >= 0.10
+            for m in aggregation["matches"]
+        )
+        risk = self._risk_from_score(final_score)
+        if not has_real_overlap and risk in ("high", "very_high"):
+            risk = "medium"
+        if local_exact_duplicate:
+            risk = "very_high"
 
         logger.info(
             "Final similarity for scenario_id=%s: local=%s vector=%s final=%s "
@@ -254,8 +283,13 @@ class PlagiarismPipeline:
         result = {
             "scenario_id": scenario_id,
             "score": round(final_score, 4),
-            "score_percent": round(final_score * 100, 2),
-            "similarity": round(final_score * 100, 2),
+            "raw_score": round(final_score, 4),
+            # Public percentages are always integers (0..100). Decimals
+            # routinely confused users (44.51% / 85.07%) for a value that
+            # represents an estimate, not a measurement.
+            "score_percent": format_percent(final_score),
+            "similarity": format_percent(final_score),
+            "display_score": format_percent(final_score),
             "risk": risk,
             "duplicate": local_exact_duplicate,
             "exact_duplicate": bool(duplicate_analyses),
@@ -322,11 +356,36 @@ class PlagiarismPipeline:
             slim["diagnostics"] = diagnostics
         return slim
 
+    @classmethod
+    def _is_keepable_match(cls, match: dict[str, Any]) -> bool:
+        """Composite-aware filter applied before deduplication.
+
+        A match is kept only if it carries enough plagiarism evidence:
+          * composite ``final_score`` >= 0.30, OR
+          * ``exact_overlap_score`` >= 0.15 (real shared n-gram), OR
+          * the match is an explicit exact duplicate.
+        Legacy matches without composite metadata pass through unchanged so
+        the local-history pipeline keeps working.
+        """
+        if match.get("match_type") == "exact_duplicate":
+            return True
+        if match.get("duplicate") is True:
+            return True
+        if "final_score" not in match and "semantic_score" not in match:
+            return True  # legacy match — let downstream logic decide
+        final = cls._match_score(match)
+        if final >= 0.30:
+            return True
+        if cls._match_exact_overlap(match) >= 0.15:
+            return True
+        return False
+
     def _aggregate_matches(
         self, raw_matches: list[dict[str, Any]]
     ) -> dict[str, Any]:
         """Dedupe matches, group by source, then truncate for display."""
         total_matches_raw = len(raw_matches)
+        raw_matches = [m for m in raw_matches if self._is_keepable_match(m)]
 
         deduped_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
         duplicate_counts: dict[tuple[Any, ...], int] = {}
@@ -375,9 +434,32 @@ class PlagiarismPipeline:
             group["matches"].append(match)
 
         for group in groups.values():
+            # Per-source dedup: a single user chunk should appear at most
+            # once per source document — keep its highest-scoring match
+            # against that source. Without this, one chunk that hits two
+            # nearby source chunks inflates the report with near-duplicate
+            # rows (e.g. user page 2 ↔ source page 2 AND source page 4).
+            best_per_current: dict[Any, dict[str, Any]] = {}
+            for match in group["matches"]:
+                current_key = (
+                    match.get("current_chunk_id")
+                    or match.get("current_chunk_index")
+                    or match.get("chunk_index")
+                    or id(match)
+                )
+                existing = best_per_current.get(current_key)
+                if existing is None or self._match_score(match) > self._match_score(existing):
+                    best_per_current[current_key] = match
+            group["matches"] = list(best_per_current.values())
+            group["matches_count"] = len(group["matches"])
             group["matches"].sort(
                 key=cmp_to_key(self._compare_matches_for_display)
             )
+            # Expose the composite best as both raw float (compat) and
+            # integer percentages so the UI renders 0–100 without decimals.
+            group["best_score_raw"] = round(float(group["best_score"]), 4)
+            group["best_score_percent"] = format_percent(group["best_score"])
+            group["display_score"] = group["best_score_percent"]
 
         sorted_sources = sorted(
             groups.values(),
@@ -409,7 +491,13 @@ class PlagiarismPipeline:
             key=cmp_to_key(self._compare_matches_for_display),
         )[: self.MAX_TOTAL_MATCHES_DISPLAYED]
 
-        total_after_dedupe = len(deduped_matches)
+        # ``total_after_dedupe`` must reflect the *final* match count after
+        # both the global dedupe and the per-source/per-current-chunk dedupe.
+        # Otherwise the UI's "X affichés sur Y détectés" banner fires even
+        # when the only delta is internal deduplication, not display capping.
+        total_after_dedupe = sum(
+            len(group["matches"]) for group in groups.values()
+        )
         is_truncated = (
             total_after_dedupe > len(displayed_matches_flat)
             or total_sources > len(displayed_groups)
@@ -462,13 +550,44 @@ class PlagiarismPipeline:
 
     @staticmethod
     def _match_score(match: dict[str, Any]) -> float:
+        """Composite plagiarism score used for ranking and risk decisions.
+
+        Falls back to the raw semantic score only when no composite has been
+        attached (e.g. matches coming from the legacy local pipeline).
+        """
+        for key in ("final_score", "similarity_score", "similarity", "score"):
+            value = match.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
+    @staticmethod
+    def _match_semantic_score(match: dict[str, Any]) -> float:
+        for key in ("semantic_score", "similarity_score", "similarity", "score"):
+            value = match.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
+    @staticmethod
+    def _match_exact_overlap(match: dict[str, Any]) -> float:
         try:
-            return float(
-                match.get("similarity_score")
-                or match.get("similarity")
-                or match.get("score")
-                or 0.0
-            )
+            return float(match.get("exact_overlap_score") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _match_lexical(match: dict[str, Any]) -> float:
+        try:
+            return float(match.get("lexical_score") or 0.0)
         except (TypeError, ValueError):
             return 0.0
 
@@ -593,6 +712,14 @@ class PlagiarismPipeline:
             candidate.get("boilerplate_ratio")
         ) < self._safe_float(existing.get("boilerplate_ratio"))
 
+    def _decorate_match_display(self, match: dict[str, Any]) -> dict[str, Any]:
+        """Ensure every match carries integer display fields for the UI."""
+        final = self._match_score(match)
+        match["final_score"] = round(float(match.get("final_score", final) or final), 4)
+        match["display_score"] = format_percent(final)
+        match["score_percent"] = format_percent(final)
+        return match
+
     def _ensure_match_quality(self, match: dict[str, Any]) -> dict[str, Any]:
         text = self._best_snippet_text(match)
         words = re.findall(r"\w+", text.lower(), flags=re.UNICODE)
@@ -623,7 +750,7 @@ class PlagiarismPipeline:
         updated["boilerplate_ratio"] = round(boilerplate_ratio, 4)
         updated["informative_word_count"] = len(informative)
         updated["match_quality_score"] = round(quality, 4)
-        return updated
+        return self._decorate_match_display(updated)
 
     def _compare_matches_for_display(
         self,
@@ -784,9 +911,16 @@ class PlagiarismPipeline:
 
     @staticmethod
     def _risk_from_score(score: float) -> str:
+        """Risk bucket derived from the composite ``final_score``.
+
+        New thresholds (per the stricter spec):
+            < 0.30 → low, < 0.55 → medium, < 0.75 → high, else very_high.
+        """
         if score >= 0.75:
+            return "very_high"
+        if score >= 0.55:
             return "high"
-        if score >= 0.4:
+        if score >= 0.30:
             return "medium"
         return "low"
 

@@ -1,7 +1,6 @@
 import axios, { AxiosError } from "axios";
 import type {
   Analysis,
-  AnalyzeResponse,
   AuditLogEvent,
   HistoryItem,
   Statistics,
@@ -245,27 +244,6 @@ export async function checkHealth(): Promise<{ message?: string; status?: string
   }
 }
 
-export async function analyzePdf(file: File): Promise<AnalyzeResponse> {
-  if (!file.name.toLowerCase().endsWith(".pdf")) {
-    throw new Error("Le fichier doit etre un PDF.");
-  }
-  const form = new FormData();
-  form.append("file", file, file.name);
-  try {
-    // On NE fixe PAS Content-Type ici : axios le pose automatiquement avec
-    // le boundary correct quand le body est un FormData. Le fixer a la main
-    // sans boundary fait echouer le parse cote serveur et le navigateur
-    // remonte un ERR_NETWORK silencieux.
-    const { data } = await client().post<AnalyzeResponse>(
-      "/api/v1/uploads/analyze",
-      form,
-    );
-    return data;
-  } catch (e) {
-    throw new Error(extractError(e));
-  }
-}
-
 // ---------- Asynchronous analyse (job + polling) ----------
 
 export interface AnalyzeJobAck {
@@ -297,9 +275,48 @@ export async function analyzePdfAsync(file: File): Promise<AnalyzeJobAck> {
   const form = new FormData();
   form.append("file", file, file.name);
   try {
-    // Cf. analyzePdf : on laisse axios calculer le boundary du multipart.
+    // On NE fixe PAS Content-Type ici : axios le pose automatiquement avec
+    // le boundary correct quand le body est un FormData.
     const { data } = await client().post<AnalyzeJobAck>(
       "/api/v1/uploads/analyze/async",
+      form,
+    );
+    return data;
+  } catch (e) {
+    throw new Error(extractError(e));
+  }
+}
+
+export interface AnalyzeBatchJob extends AnalyzeJobAck {
+  original_filename: string;
+}
+
+export interface AnalyzeBatchAck {
+  success: boolean;
+  count: number;
+  jobs: AnalyzeBatchJob[];
+}
+
+/** POST /uploads/analyze/async/batch — accepts several PDFs and enqueues
+ *  one independent analysis per file. Returns one job_id per file. */
+export async function analyzeMultiplePdfsAsync(
+  files: File[],
+): Promise<AnalyzeBatchAck> {
+  if (files.length === 0) {
+    throw new Error("Au moins un fichier est requis.");
+  }
+  for (const f of files) {
+    if (!f.name.toLowerCase().endsWith(".pdf")) {
+      throw new Error(`Le fichier ${f.name} doit etre un PDF.`);
+    }
+  }
+  const form = new FormData();
+  for (const f of files) {
+    form.append("files", f, f.name);
+  }
+  try {
+    const { data } = await client().post<AnalyzeBatchAck>(
+      "/api/v1/uploads/analyze/async/batch",
       form,
     );
     return data;
@@ -490,6 +507,7 @@ export async function deleteUser(userId: string): Promise<void> {
 export interface FetchAuditLogParams {
   limit?: number;
   user_id?: string;
+  username?: string;
   event_type?: string;
   since?: string;
 }

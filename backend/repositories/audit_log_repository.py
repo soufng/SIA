@@ -10,6 +10,7 @@ contrôlée séparément (RGPD).
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -100,6 +101,7 @@ class AuditLogRepository:
         *,
         limit: int = 100,
         user_id: str | None = None,
+        username: str | None = None,
         event_type: str | None = None,
         since: str | None = None,
     ) -> list[dict[str, Any]]:
@@ -107,6 +109,13 @@ class AuditLogRepository:
         query: dict[str, Any] = {}
         if user_id:
             query["user_id"] = user_id
+        if username:
+            # Recherche insensible à la casse et partielle pour matcher la
+            # saisie libre depuis l'UI admin.
+            query["username"] = {
+                "$regex": _escape_regex(username),
+                "$options": "i",
+            }
         if event_type:
             query["event_type"] = event_type
         if since:
@@ -127,6 +136,7 @@ class AuditLogRepository:
             try:
                 coll.create_index([("timestamp", DESCENDING)])
                 coll.create_index("user_id")
+                coll.create_index("username")
                 coll.create_index("event_type")
                 self._index_ensured = True
             except Exception:  # pragma: no cover
@@ -136,11 +146,17 @@ class AuditLogRepository:
     def _get_database(self) -> Database:
         if self.database is not None:
             return self.database
-        return get_database(self.mongodb_url, self.database_name)
+        # ``get_database`` reads from ``settings`` — instance-level URL /
+        # name fields are only used by tests that inject ``database`` directly.
+        return get_database()
 
 
 def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _escape_regex(value: str) -> str:
+    return re.escape(value.strip())
 
 
 def _serialize(document: dict[str, Any]) -> dict[str, Any]:

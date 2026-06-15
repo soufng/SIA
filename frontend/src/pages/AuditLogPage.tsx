@@ -80,16 +80,16 @@ export function AuditLogPage() {
   const role = useAuthStore((s) => s.role);
 
   const [eventType, setEventType] = useState<string>("");
-  const [userIdFilter, setUserIdFilter] = useState<string>("");
+  const [usernameFilter, setUsernameFilter] = useState<string>("");
   const [limit, setLimit] = useState<number>(100);
 
   const params = useMemo(
     () => ({
       limit,
       event_type: eventType || undefined,
-      user_id: userIdFilter || undefined,
+      username: usernameFilter.trim() || undefined,
     }),
-    [eventType, userIdFilter, limit],
+    [eventType, usernameFilter, limit],
   );
 
   const query = useQuery({
@@ -157,12 +157,12 @@ export function AuditLogPage() {
             </div>
             <div>
               <label className="text-xs font-medium text-slate-600">
-                user_id
+                Utilisateur
               </label>
               <Input
-                value={userIdFilter}
-                onChange={(e) => setUserIdFilter(e.target.value)}
-                placeholder="UUID utilisateur (laisser vide pour tout afficher)"
+                value={usernameFilter}
+                onChange={(e) => setUsernameFilter(e.target.value)}
+                placeholder="Nom d'utilisateur (laisser vide pour tout afficher)"
                 autoComplete="off"
               />
             </div>

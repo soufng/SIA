@@ -377,6 +377,118 @@ async def upload_and_queue_analysis(
     }
 
 
+@router.post("/analyze/async/batch", status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("15/hour")
+async def upload_batch_and_queue_analysis(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    files: list[UploadFile] = File(...),
+    upload_service: UploadService = Depends(get_upload_service),
+    analysis_service: AnalysisService = Depends(get_analysis_service),
+    analysis_repository: AnalysisRepository = Depends(get_analysis_repository),
+    jobs_repository: JobsRepository = Depends(get_jobs_repository),
+    audit: AuditLogRepository = Depends(get_audit_log_repository),
+    actor: CurrentUser = Depends(require_user),
+) -> dict[str, Any]:
+    """Accept N PDFs in one request and queue one independent analysis per file.
+
+    Chaque fichier est validé puis traité par la même pipeline asynchrone que
+    ``/uploads/analyze/async`` — un ``job_id`` et un ``scenario_id`` distincts
+    sont créés pour chaque PDF, et chaque job apparaît séparément dans
+    l'historique. Le client suit la progression de chaque job via
+    ``GET /uploads/jobs/{id}``.
+    """
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Au moins un fichier est requis.",
+        )
+    if len(files) > 20:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Trop de fichiers (maximum 20 par batch).",
+        )
+
+    # Lecture et validation de TOUS les fichiers d'abord — si l'un est
+    # invalide, on rejette le batch entier sans rien enqueuer (atomicité).
+    pdf_contents: list[tuple[bytes, str]] = []
+    for file in files:
+        _read_and_validate_pdf(file)
+        assert file.filename is not None
+        try:
+            content = await file.read()
+        finally:
+            await file.close()
+        _validate_pdf_bytes(content, file.filename)
+        pdf_contents.append((content, file.filename))
+
+    logger.info(
+        "Queuing batch analysis for %d PDF files: %s",
+        len(pdf_contents),
+        [name for _, name in pdf_contents],
+    )
+
+    jobs: list[dict[str, Any]] = []
+    for content, filename in pdf_contents:
+        try:
+            file_info = upload_service.save_uploaded_file(
+                file_content=content,
+                original_filename=filename,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
+        scenario_id = str(uuid4())
+        job = jobs_repository.create_job(
+            file_path=str(file_info["file_path"]),
+            original_filename=str(file_info["original_filename"]),
+            scenario_id=scenario_id,
+        )
+
+        background_tasks.add_task(
+            run_analysis_job,
+            job_id=job["job_id"],
+            scenario_id=scenario_id,
+            file_path=str(file_info["file_path"]),
+            original_filename=str(file_info["original_filename"]),
+            analysis_service=analysis_service,
+            analysis_repository=analysis_repository,
+            jobs_repository=jobs_repository,
+            history_document_builder=_build_history_document,
+        )
+
+        _audit_scenario_upload(
+            audit,
+            actor,
+            request,
+            scenario_id=scenario_id,
+            filename=filename,
+            flavour="async-batch",
+        )
+
+        jobs.append(
+            {
+                "success": True,
+                "job_id": job["job_id"],
+                "scenario_id": scenario_id,
+                "status": job["status"],
+                "stage": job["stage"],
+                "progress_pct": job["progress_pct"],
+                "original_filename": filename,
+            }
+        )
+
+    logger.info(
+        "Queued %d batch analysis jobs: %s",
+        len(jobs),
+        [j["job_id"] for j in jobs],
+    )
+    return {"success": True, "count": len(jobs), "jobs": jobs}
+
+
 @router.get("/jobs/{job_id}")
 def get_job_state(
     job_id: str,

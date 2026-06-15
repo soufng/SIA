@@ -16,12 +16,10 @@ import {
   BarChart3,
   CheckCircle2,
   Clock,
-  Database,
   FileText,
   Files,
   Gauge,
   Landmark,
-  Layers,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -173,7 +171,7 @@ function Kpi({
 
   const display =
     format === "percent"
-      ? `${animated.toFixed(2)}%`
+      ? `${Math.round(animated)}%`
       : Math.round(animated).toLocaleString("fr-FR");
 
   return (
@@ -587,52 +585,8 @@ export function HomePage() {
                 <Upload className="h-4 w-4" />
                 Lancer une analyse
               </Button>
-              <Button
-                variant="outline"
-                className="border-white/25 bg-white/5 text-white backdrop-blur hover:bg-white/15"
-                onClick={() => navigate("/analytics")}
-              >
-                <BarChart3 className="h-4 w-4" />
-                Voir les statistiques
-              </Button>
-              <Button
-                variant="ghost"
-                className="text-white/85 hover:bg-white/10 hover:text-white"
-                onClick={() => navigate("/history")}
-              >
-                <Clock className="h-4 w-4" />
-                Historique
-              </Button>
             </div>
 
-            <div className="mt-7 flex flex-wrap items-center gap-2 text-xs">
-              <Badge
-                className={cn(
-                  "gap-1.5 border bg-white/10 backdrop-blur",
-                  backendUp
-                    ? "border-emerald-300/40 text-emerald-100"
-                    : "border-amber-300/40 text-amber-100",
-                )}
-              >
-                <span
-                  className={cn(
-                    "h-1.5 w-1.5 rounded-full",
-                    backendUp
-                      ? "bg-emerald-400 animate-pulse"
-                      : "bg-amber-400",
-                  )}
-                />
-                {backendUp ? "Backend en ligne" : "Backend injoignable"}
-              </Badge>
-              <Badge className="gap-1.5 border-white/15 bg-white/10 text-white/85 backdrop-blur">
-                <Database className="h-3 w-3" />
-                Qdrant 768d · e5-base
-              </Badge>
-              <Badge className="gap-1.5 border-white/15 bg-white/10 text-white/85 backdrop-blur">
-                <Layers className="h-3 w-3" />
-                Document → Plagiat → Modération → RAG
-              </Badge>
-            </div>
           </div>
 
           {/* Right column — floating brand card */}
@@ -655,29 +609,6 @@ export function HomePage() {
                 <p className="mt-1 bg-gradient-to-r from-white to-ccm-gold bg-clip-text font-mono text-2xl font-bold text-transparent">
                   SIA
                 </p>
-              </div>
-              {/* Mini stat strip */}
-              <div className="grid w-full grid-cols-3 gap-2 border-t border-white/10 pt-3 text-center">
-                <div>
-                  <p className="font-mono text-sm font-bold text-white">
-                    {totalAnalyses}
-                  </p>
-                  <p className="text-[9px] uppercase tracking-wider text-white/60">
-                    Analyses
-                  </p>
-                </div>
-                <div className="border-x border-white/10">
-                  <p className="font-mono text-sm font-bold text-white">3</p>
-                  <p className="text-[9px] uppercase tracking-wider text-white/60">
-                    Langues
-                  </p>
-                </div>
-                <div>
-                  <p className="font-mono text-sm font-bold text-white">4</p>
-                  <p className="text-[9px] uppercase tracking-wider text-white/60">
-                    Pipelines
-                  </p>
-                </div>
               </div>
             </div>
           </div>

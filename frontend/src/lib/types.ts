@@ -43,6 +43,20 @@ export interface PlagiarismMatch {
   match_quality_score?: number;
   boilerplate_ratio?: number;
   informative_word_count?: number;
+  // Composite plagiarism scoring (cf. backend/utils/composite_scoring.py).
+  // ``final_score`` est la note publique (cap anti faux-positif inclus).
+  // ``risk`` est la classe calculée côté backend ; à privilégier sur tout
+  // re-derivation depuis le pourcentage affiché.
+  semantic_score?: number;
+  lexical_score?: number;
+  exact_overlap_score?: number;
+  named_entity_overlap_score?: number;
+  dialogue_overlap_score?: number;
+  final_score?: number;
+  display_score?: number;
+  risk?: "low" | "medium" | "high" | "very_high" | string;
+  is_false_positive?: boolean;
+  debug_reason?: string | null;
 }
 
 export interface PlagiarismSource {
@@ -178,6 +192,8 @@ export interface MoroccanFlag {
   /** Risk vocab. May be the French scale or the legacy English one. */
   severity: string;
   chunk_index?: number | null;
+  /** Numéro de page du PDF (attaché côté backend via chunk_metadata). */
+  page_number?: number | null;
   evidence?: string;
   explanation?: string;
 }
@@ -192,6 +208,8 @@ export interface MoroccanMention {
   category: MoroccanCategoryKey | string;
   subject?: string;
   chunk_index?: number | null;
+  /** Numéro de page du PDF (attaché côté backend via chunk_metadata). */
+  page_number?: number | null;
   evidence?: string;
   /** Severity bucket when this mention is also flagged, ``null`` otherwise. */
   flagged_severity?: string | null;
@@ -280,7 +298,12 @@ export interface Statistics {
   average_similarity_score?: number;
   average_profanity_score?: number;
   average_adult_content_score?: number;
-  risk_counts?: { low?: number; medium?: number; high?: number };
+  risk_counts?: {
+    low?: number;
+    medium?: number;
+    high?: number;
+    very_high?: number;
+  };
   top_similar_scenarios?: Array<Record<string, unknown>>;
   analyses_by_date?: Array<{ date: string; count: number }>;
   risky_analyses?: Array<Record<string, unknown>>;

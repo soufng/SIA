@@ -5,6 +5,12 @@ from typing import Any
 from backend.core.config import settings
 from backend.services.embedding_service import EmbeddingService
 from backend.services.vector_service import VectorService
+from backend.utils.composite_scoring import (
+    compute_composite_scores,
+    format_percent,
+    is_likely_false_positive,
+    risk_from_composite,
+)
 from backend.utils.text_overlap import (
     build_plagiarism_snippet,
     collect_boilerplate_ngrams,
@@ -231,19 +237,22 @@ class PlagiarismService:
                 min_chars=400,
                 source_boilerplate_ngrams=boilerplate_ngrams,
             )
-            # A high cosine score on its own is not enough — short or generic
-            # texts routinely score ~0.80 against unrelated passages. We
-            # require at least one real lexical overlap span (>= 4 contiguous
-            # informative tokens, per build_plagiarism_snippet) before
-            # accepting the match as plagiarism.
-            if not snippet_info.get("overlap_text"):
-                logger.debug(
-                    "Ignoring match for chunk_index=%s (score=%.3f) — no lexical overlap with %s.",
-                    chunk_index,
-                    score,
-                    matched_scenario_str or "(unknown)",
+            # Composite plagiarism score. The raw cosine on its own is not
+            # enough — screenplays share a lot of generic vocabulary that
+            # inflates the embedding similarity without indicating real
+            # copying. We combine semantic + lexical + exact overlap +
+            # dialogue overlap and apply anti-false-positive penalties.
+            composite = compute_composite_scores(
+                semantic_score=score,
+                query_text=str(chunk_text or ""),
+                source_text=str(display_source),
+            )
+            is_false_positive, fp_reason = is_likely_false_positive(composite)
+            if is_false_positive:
+                composite = dict(composite)
+                composite["final_score"] = min(
+                    float(composite.get("final_score", 0.0)), 0.30
                 )
-                continue
             snippet = snippet_info["snippet"]
             matches.append(
                 {
@@ -258,6 +267,12 @@ class PlagiarismService:
                     "matched_chunk_id": payload.get("chunk_id"),
                     "source_chunk_id": payload.get("chunk_id"),
                     "source_chunk_index": source_chunk_index,
+                    # Propagate source filenames from the Qdrant payload so the
+                    # plagiarism pipeline can label each source group with the
+                    # real scenario name instead of "non disponible".
+                    "original_filename": payload.get("original_filename"),
+                    "stored_filename": payload.get("stored_filename"),
+                    "filename": payload.get("original_filename"),
                     "matched_chunk_text": payload.get("chunk_text"),
                     "matched_chunk_text_display": (
                         payload.get("chunk_text_display")
@@ -277,6 +292,19 @@ class PlagiarismService:
                     "match_quality_score": quality["match_quality_score"],
                     "similarity_score": score,
                     "score": score,
+                    "semantic_score": composite["semantic_score"],
+                    "lexical_score": composite["lexical_score"],
+                    "exact_overlap_score": composite["exact_overlap_score"],
+                    "named_entity_overlap_score": composite[
+                        "named_entity_overlap_score"
+                    ],
+                    "dialogue_overlap_score": composite["dialogue_overlap_score"],
+                    "final_score": composite["final_score"],
+                    "raw_score": score,
+                    "display_score": format_percent(composite["final_score"]),
+                    "risk": risk_from_composite(composite),
+                    "is_false_positive": is_false_positive,
+                    "debug_reason": fp_reason,
                 }
             )
 

@@ -3,3 +3,7 @@ dist
 .env
 .env.local
 *.log
+# Vite/TS build by-products at the root (the real config is vite.config.ts).
+/vite.config.d.ts
+/vite.config.js
+/tsconfig.tsbuildinfo

@@ -34,6 +34,8 @@ from backend.services.llm_provider import (
     _redact,
     get_llm_provider,
 )
+from backend.services.llm_reranker import LLMReranker
+from backend.services.multi_query_retriever import MultiQueryRetriever
 from backend.services.vector_service import VectorService
 
 
@@ -110,6 +112,8 @@ class AdvancedRAGService:
         max_passages: int | None = None,
         embedding_service: EmbeddingService | None = None,
         vector_service: VectorService | None = None,
+        multi_query_retriever: MultiQueryRetriever | None = None,
+        reranker: LLMReranker | None = None,
     ) -> None:
         self.llm_provider = llm_provider or get_llm_provider()
         self.max_passages = max_passages or settings.ADVANCED_RAG_MAX_PASSAGES
@@ -118,6 +122,23 @@ class AdvancedRAGService:
         # SentenceTransformer load cost.
         self._embedding_service = embedding_service
         self._vector_service = vector_service
+        self._multi_query_retriever = multi_query_retriever
+        self._reranker = reranker
+
+    @property
+    def candidate_pool_size(self) -> int:
+        """How many passages to keep before the (optional) rerank step."""
+        if settings.ADVANCED_RAG_RERANK_ENABLED:
+            return max(
+                settings.ADVANCED_RAG_RERANK_POOL_SIZE, self.max_passages
+            )
+        return self.max_passages
+
+    @property
+    def reranker(self) -> LLMReranker:
+        if self._reranker is None:
+            self._reranker = LLMReranker(llm_provider=self.llm_provider)
+        return self._reranker
 
     @property
     def embedding_service(self) -> EmbeddingService:
@@ -130,6 +151,19 @@ class AdvancedRAGService:
         if self._vector_service is None:
             self._vector_service = VectorService()
         return self._vector_service
+
+    @property
+    def multi_query_retriever(self) -> MultiQueryRetriever:
+        """Lazy-build the multi-query retriever sharing services with self."""
+        if self._multi_query_retriever is None:
+            self._multi_query_retriever = MultiQueryRetriever(
+                llm_provider=self.llm_provider,
+                embedding_service=self.embedding_service,
+                vector_service=self.vector_service,
+                num_queries=settings.ADVANCED_RAG_MULTI_QUERY_COUNT,
+                per_query_limit=max(self.max_passages, 5),
+            )
+        return self._multi_query_retriever
 
     def generate(
         self,
@@ -171,22 +205,6 @@ class AdvancedRAGService:
         else:
             user_payload = user_prompt
 
-        if self._should_use_deterministic_report(context):
-            narrative = self._render_fallback_narrative(context)
-            return {
-                "scenario_id": scenario,
-                "generated_at": datetime.now(UTC).isoformat(),
-                "narrative": narrative,
-                "context": self._serialize_context(context),
-                "prompt": user_prompt,
-                "llm": {
-                    "provider": "mock",
-                    "model": "deterministic-template",
-                    "used_fallback": True,
-                    "error": None,
-                },
-            }
-
         try:
             llm_response = self.llm_provider.complete(
                 system=SYSTEM_PROMPT,
@@ -223,22 +241,6 @@ class AdvancedRAGService:
                 "error": error,
             },
         }
-
-    @staticmethod
-    def _should_use_deterministic_report(context: RAGContext) -> bool:
-        """Avoid slow/fragile LLM calls when there is no retrieval context.
-
-        If the only actionable signals are deterministic detector outputs
-        (exact duplicate or PrincipesMarocPipeline flags), the LLM would not
-        add new evidence and must not create risk. The deterministic narrative
-        is faster and keeps the report tied to the existing flags.
-        """
-        moroccan_flags = (
-            (context.moroccan_constants_summary or {}).get("flags") or []
-        )
-        return context.exact_duplicate or (
-            len(context.passages) == 0 and bool(moroccan_flags)
-        )
 
     # ---------- Context building ----------
 
@@ -278,7 +280,7 @@ class AdvancedRAGService:
         # Qdrant directly from the current document's chunks so the LLM
         # still has *some* semantic context to reason about.
         fallback_used = False
-        if not exact_duplicate and len(passages) < self.max_passages:
+        if not exact_duplicate and len(passages) < self.candidate_pool_size:
             extra_passages, fallback_used = self._fallback_retrieve(
                 analysis=analysis,
                 scenario_id=scenario_id,
@@ -287,13 +289,29 @@ class AdvancedRAGService:
             if extra_passages:
                 passages = self._merge_passages(passages, extra_passages)
 
+        # Optional rerank step: a wider cosine pool was collected above; ask
+        # the LLM to re-score it by editorial relevance and keep the top
+        # ``max_passages``. On any failure the original order survives.
+        rerank_diagnostics: dict[str, Any] = {}
+        if (
+            settings.ADVANCED_RAG_RERANK_ENABLED
+            and not exact_duplicate
+            and len(passages) > self.max_passages
+        ):
+            passages, rerank_diagnostics = self._rerank_passages(
+                passages, document_stats
+            )
+
         retrieval_status, retrieval_reason, retrieval_diagnostics = (
             self._diagnose_retrieval(plagiarism=plagiarism, passages=passages)
         )
         retrieval_diagnostics.update(selection_stats)
         retrieval_diagnostics["max_passages"] = self.max_passages
+        retrieval_diagnostics["candidate_pool_size"] = self.candidate_pool_size
         if fallback_used:
             retrieval_diagnostics["fallback_retrieval_used"] = True
+        if rerank_diagnostics:
+            retrieval_diagnostics["rerank"] = rerank_diagnostics
 
         document_summary = {
             "original_filename": document_stats.get("original_filename"),
@@ -376,6 +394,133 @@ class AdvancedRAGService:
             "democratic_choice": "Choix democratique",
         }.get(category, category or "Categorie non disponible")
 
+    def _rerank_passages(
+        self,
+        passages: list[RetrievedPassage],
+        document_stats: dict[str, Any],
+    ) -> tuple[list[RetrievedPassage], dict[str, Any]]:
+        """Apply LLM rerank and trim to ``self.max_passages``.
+
+        Returns ``(trimmed_passages, diagnostics)``. The diagnostics dict
+        is empty when the rerank step fell back; that is the signal for
+        the caller that the cosine ordering survived unchanged.
+        """
+        excerpts = [
+            p.source_excerpt or p.current_excerpt or "" for p in passages
+        ]
+        summary = self._document_summary_for_rerank(passages, document_stats)
+        result = self.reranker.rerank(
+            document_summary=summary, candidates=excerpts
+        )
+        if result.used_fallback:
+            trimmed = passages[: self.max_passages]
+            for i, p in enumerate(trimmed, start=1):
+                p.rank = i
+            return trimmed, {
+                "applied": False,
+                "reason": result.parse_error or "fallback",
+                "pool_size": len(passages),
+            }
+
+        ordered = [passages[i] for i in result.ordered_indexes]
+        trimmed = ordered[: self.max_passages]
+        for i, p in enumerate(trimmed, start=1):
+            p.rank = i
+        return trimmed, {
+            "applied": True,
+            "pool_size": len(passages),
+            "kept": len(trimmed),
+            "scores": {
+                str(i): round(s, 2) for i, s in list(result.scores.items())[:20]
+            },
+        }
+
+    @staticmethod
+    def _document_summary_for_rerank(
+        passages: list[RetrievedPassage],
+        document_stats: dict[str, Any],
+    ) -> str:
+        """Build a short, self-contained summary for the rerank prompt.
+
+        We don't have the full document text here, so we synthesise a
+        compact view from the analysed-side excerpts (which are taken
+        from the uploaded scenario). That gives the LLM enough signal to
+        judge which candidate is most relevant.
+        """
+        filename = document_stats.get("original_filename") or "scénario inconnu"
+        head = f"Fichier : {filename}."
+        analysed = [p.current_excerpt for p in passages if p.current_excerpt][:3]
+        if analysed:
+            joined = " | ".join(a.replace("\n", " ") for a in analysed)
+            return f"{head} Extraits représentatifs : {joined}"
+        return head
+
+    def _multi_query_extra_passages(
+        self,
+        *,
+        document_excerpts: list[str],
+        scenario_id: str,
+        seen_signatures: set[str],
+        start_rank: int,
+        budget: int,
+    ) -> list[RetrievedPassage]:
+        """Run the LLM-driven multi-query retriever and convert hits.
+
+        Failures (LLM/JSON/embedding/Qdrant) are swallowed and return ``[]``
+        so the caller can fall through to the legacy chunks-as-queries leg
+        without observable degradation.
+        """
+        if budget <= 0:
+            return []
+        try:
+            result = self.multi_query_retriever.retrieve(
+                document_excerpts=document_excerpts,
+                exclude_scenario_id=scenario_id,
+            )
+        except Exception:
+            logger.exception("Multi-query retrieval crashed; falling through.")
+            return []
+        if result.used_fallback or not result.merged_hits:
+            return []
+
+        passages: list[RetrievedPassage] = []
+        for hit in result.merged_hits:
+            if len(passages) >= budget:
+                break
+            payload = hit.get("payload") or {}
+            hit_scenario = str(payload.get("scenario_id") or "")
+            source_text = str(
+                payload.get("chunk_text_display")
+                or payload.get("chunk_text")
+                or ""
+            )
+            signature = (
+                f"{hit_scenario}::"
+                f"{_normalize_signature(source_text)[:160]}"
+            )
+            if signature in seen_signatures:
+                continue
+            seen_signatures.add(signature)
+            passages.append(
+                self._to_passage(
+                    rank=start_rank + len(passages),
+                    match={
+                        "matched_scenario_id": hit_scenario,
+                        "original_filename": payload.get("original_filename"),
+                        "filename": payload.get("stored_filename"),
+                        "stored_filename": payload.get("stored_filename"),
+                        "similarity_score": float(hit.get("score") or 0.0),
+                        "matched_chunk_text_display": source_text,
+                        "matched_chunk_text": payload.get("chunk_text"),
+                        "chunk_text": hit.get("matched_via_query") or "",
+                        "page_number": payload.get("page_number"),
+                        "source_page_number": payload.get("page_number"),
+                        "source_chunk_index": payload.get("chunk_index"),
+                    },
+                )
+            )
+        return passages
+
     def _fallback_retrieve(
         self,
         analysis: dict[str, Any],
@@ -393,7 +538,7 @@ class AdvancedRAGService:
         if not query_texts:
             return [], False
 
-        budget = max(self.max_passages - len(already_seen), 0)
+        budget = max(self.candidate_pool_size - len(already_seen), 0)
         if budget == 0:
             return [], False
 
@@ -402,13 +547,34 @@ class AdvancedRAGService:
             for p in already_seen
         }
         extra: list[RetrievedPassage] = []
+
+        # Multi-query retrieval (semantic query rewriting). When the LLM
+        # successfully produces N rewritten queries we use those hits
+        # *before* falling back to the legacy "longest-chunks-as-queries"
+        # strategy. The two passes complement each other: rewritten queries
+        # catch transpositions/reformulations, raw-chunk queries catch
+        # near-verbatim copies.
+        if settings.ADVANCED_RAG_MULTI_QUERY_ENABLED:
+            extra = self._multi_query_extra_passages(
+                document_excerpts=query_texts,
+                scenario_id=scenario_id,
+                seen_signatures=seen_signatures,
+                start_rank=len(already_seen) + 1,
+                budget=budget,
+            )
+            budget = max(
+                self.candidate_pool_size - len(already_seen) - len(extra), 0
+            )
+            if budget == 0:
+                return extra, True
+
         try:
             embeddings = self.embedding_service.generate_embeddings(
                 query_texts, is_query=True
             )
         except Exception:
             logger.exception("Fallback retrieval: embedding step failed.")
-            return [], False
+            return extra, bool(extra)
 
         per_query_limit = max(budget, 3)
         for query_text, embedding in zip(query_texts, embeddings):
@@ -621,7 +787,7 @@ class AdvancedRAGService:
                 continue
             seen_signatures.add(signature)
             ranked.append(self._to_passage(len(ranked) + 1, raw))
-            if len(ranked) >= self.max_passages:
+            if len(ranked) >= self.candidate_pool_size:
                 break
 
         # Sort by score desc for the prompt — keeps the strongest signals on top.
@@ -877,7 +1043,13 @@ production / le comité de lecture.
 
 Contraintes :
 - N'invente aucun fait absent du contexte.
-- Cite les passages par leur numéro (« Passage 2 »).
+- Cite les passages par leur numéro ET par leur document source en utilisant
+exactement le format suivant : « Passage 2 (source : NOM_DU_FICHIER.pdf) ».
+- Le nom du fichier source figure dans la ligne « Document source : … » de
+chaque passage ci-dessus. Si cette ligne contient « non disponible », ecris
+« source non identifiee » au lieu d'inventer un nom.
+- N'invente JAMAIS un nom de fichier source : reprends exactement la chaine
+fournie dans « Document source ».
 - Pour les constantes nationales marocaines, explique uniquement les flags
 fournis dans la section dediee. Toute explication doit citer ou resumer
 l'evidence du chunk correspondant.
@@ -997,7 +1169,9 @@ au doublon exact.
 4. Enfin, produire les recommandations.
 
 Contraintes STRICTES :
-- Ne jamais inventer de sources.
+- Ne jamais inventer de sources. Quand tu cites un passage externe, utilise
+exactement le nom de fichier fourni dans « Document source externe : … ».
+Si ce champ vaut « non disponible », ecris « source non identifiee ».
 - Ne jamais transformer un doublon exact interne en accusation de plagiat.
 - Ne jamais affirmer une intention volontaire.
 - Ne jamais presenter les anciennes analyses identiques comme plusieurs
@@ -1448,7 +1622,11 @@ def _clean_str(value: Any) -> str:
 def _truncate(value: Any, max_length: int) -> str:
     if value is None:
         return ""
-    text = _WHITESPACE_RE.sub(" ", str(value)).strip()
+    # NFKC : decompose les Arabic Presentation Forms (zone FExx) en caracteres
+    # standard avant d'envoyer au LLM. Sans ca le modele recopie les glyphes
+    # decomposes des PDFs marocains tels quels dans le rapport final.
+    normalized = unicodedata.normalize("NFKC", str(value))
+    text = _WHITESPACE_RE.sub(" ", normalized).strip()
     if not text:
         return ""
     if len(text) <= max_length:

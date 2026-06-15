@@ -17,6 +17,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
+
+# Installe torch CPU-only AVANT le reste : sentence-transformers tirerait
+# sinon la variante GPU (~3 GB de libs nvidia-cuda-* inutiles ici puisque
+# le conteneur n'a pas de GPU). L'index PyTorch CPU sert ses propres
+# wheels, le PyPI normal reste accessible pour les autres deps.
+RUN pip install --user --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cpu \
+        --extra-index-url https://pypi.org/simple \
+        torch
 RUN pip install --user --no-cache-dir -r requirements.txt
 
 
@@ -24,25 +33,28 @@ FROM python:3.12-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PATH=/root/.local/bin:$PATH \
+    PATH=/home/sia/.local/bin:$PATH \
     PORT=8000
+
+# Crée l'utilisateur runtime AVANT le COPY pour que les fichiers soient
+# directement dans son home — /root est en 0700 et non traversable par un
+# user non-root, ce qui ferait planter uvicorn au démarrage.
+RUN useradd --create-home --uid 1000 sia
 
 WORKDIR /app
 
-# On copie uniquement les site-packages du builder.
-COPY --from=builder /root/.local /root/.local
+# On copie uniquement les site-packages du builder dans le home du user.
+COPY --from=builder --chown=sia:sia /root/.local /home/sia/.local
 
 # Code applicatif. ``backend/`` + ``data/moderation_lists/`` + ``scripts/``
 # sont nécessaires au runtime ; le reste (tests, docs, frontend) reste
 # dehors pour limiter la taille d'image.
-COPY backend/ ./backend/
-COPY data/moderation_lists/ ./data/moderation_lists/
-COPY scripts/ ./scripts/
+COPY --chown=sia:sia backend/ ./backend/
+COPY --chown=sia:sia data/moderation_lists/ ./data/moderation_lists/
+COPY --chown=sia:sia scripts/ ./scripts/
 
-# Tournera comme un user non-root.
-RUN useradd --create-home --uid 1000 sia \
-    && mkdir -p data/raw data/processed \
-    && chown -R sia:sia /app /root/.local
+RUN mkdir -p data/raw data/processed \
+    && chown -R sia:sia /app
 
 USER sia
 
