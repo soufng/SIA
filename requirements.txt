@@ -9,3 +9,4 @@ sentence-transformers
 PyMuPDF
 python-dotenv
 slowapi
+datasketch

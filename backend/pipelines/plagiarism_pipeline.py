@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 from backend.core.config import settings
 from backend.services.embedding_service import EmbeddingService
 from backend.services.local_similarity_service import LocalSimilarityService
+from backend.services.minhash_plagiarism_service import MinHashPlagiarismService
 from backend.services.plagiarism_service import PlagiarismService
 from backend.services.strict_similarity_service import StrictSimilarityService
 from backend.services.vector_service import VectorService
@@ -77,12 +78,14 @@ class PlagiarismPipeline:
         strict_similarity_service: StrictSimilarityService,
         embedding_service: EmbeddingService,
         vector_service: VectorService,
+        minhash_service: MinHashPlagiarismService | None = None,
     ) -> None:
         self.local_similarity_service = local_similarity_service
         self.plagiarism_service = plagiarism_service
         self.strict_similarity_service = strict_similarity_service
         self.embedding_service = embedding_service
         self.vector_service = vector_service
+        self.minhash_service = minhash_service or MinHashPlagiarismService()
 
     # ---------- Public entry points ----------
 
@@ -125,10 +128,22 @@ class PlagiarismPipeline:
             excluded_scenario_ids=excluded_scenario_ids,
             chunk_metadata=document.chunk_metadata,
         )
+        # MinHash lexical fingerprint pass. Runs in parallel with the
+        # embedding pipeline; the result is exposed alongside the
+        # existing scores so the UI can show "plagiat textuel" next to
+        # "similarité sémantique" before we make the textual signal the
+        # primary verdict.
+        minhash_result = self._safe_minhash_analyze(
+            scenario_id=document.scenario_id,
+            chunks=document.chunks,
+            chunk_metadata=document.chunk_metadata,
+            excluded_scenario_ids=excluded_scenario_ids,
+        )
         plagiarism_result = self._merge_plagiarism_results(
             scenario_id=document.scenario_id,
             local_result=local_result,
             vector_result=vector_result,
+            minhash_result=minhash_result,
         )
         strict_match = self._compute_strict_match(
             scenario_id=document.scenario_id,
@@ -193,11 +208,39 @@ class PlagiarismPipeline:
 
     # ---------- Merge / aggregate ----------
 
+    def _safe_minhash_analyze(
+        self,
+        *,
+        scenario_id: str,
+        chunks: list[str],
+        chunk_metadata: list[dict[str, Any]] | None,
+        excluded_scenario_ids: set[str] | None,
+    ) -> dict[str, Any]:
+        """Run the MinHash pass without ever failing the main pipeline."""
+        try:
+            return self.minhash_service.analyze_chunks(
+                scenario_id=scenario_id,
+                chunks=chunks,
+                chunk_metadata=chunk_metadata,
+                excluded_scenario_ids=excluded_scenario_ids,
+            )
+        except Exception:
+            logger.exception("MinHash plagiarism pass failed.")
+            return {
+                "scenario_id": scenario_id,
+                "global_similarity_score": 0.0,
+                "plagiarism_detected": False,
+                "matches": [],
+                "engine": "minhash",
+                "error": True,
+            }
+
     def _merge_plagiarism_results(
         self,
         scenario_id: str,
         local_result: dict[str, Any],
         vector_result: dict[str, Any],
+        minhash_result: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Combine local + vector matches, group by source, dedupe, truncate."""
         local_score = float(local_result.get("score", 0.0) or 0.0)
@@ -221,8 +264,16 @@ class PlagiarismPipeline:
             if item.get("scenario_id")
         }
 
+        # Phase 2 — MinHash matches now feed the same merge as the
+        # local / vector matches. Because their ``final_score`` is
+        # computed from Jaccard (a real textual reuse signal), they
+        # dominate the per-current-chunk dedupe and become the source of
+        # the headline plagiarism verdict.
         raw_matches: list[dict[str, Any]] = []
-        for result in (local_result, vector_result):
+        candidate_results = (local_result, minhash_result, vector_result)
+        for result in candidate_results:
+            if not isinstance(result, dict):
+                continue
             result_matches = result.get("matches", [])
             if isinstance(result_matches, list):
                 raw_matches.extend(
@@ -235,36 +286,103 @@ class PlagiarismPipeline:
                     )
                 )
 
+        # Phase 2 (suite) — Quand MinHash a tourné sans rien trouver,
+        # on supprime tous les matches sémantiques restants : ils ne
+        # reposent que sur une proximité de style (format de scénario,
+        # langue partagée, registre émotionnel). Les afficher avec un
+        # "35 % MODÉRÉ" donne une impression de plagiat alors que le
+        # verdict global est "pas un plagiat" — c'est trompeur et ça
+        # casse la crédibilité du rapport.
+        #
+        # On préserve les matches issus du moteur MinHash lui-même
+        # (engine == "minhash") et les matches de doublon local
+        # (qui ont déjà une preuve hash-level).
+        minhash_ran = isinstance(minhash_result, dict) and not minhash_result.get(
+            "error"
+        )
+        if minhash_ran and not local_exact_duplicate:
+            minhash_keys: set[tuple[Any, Any]] = set()
+            for m in minhash_result.get("matches", []) or []:
+                if not isinstance(m, dict):
+                    continue
+                key = (
+                    m.get("current_chunk_id"),
+                    m.get("matched_scenario_id"),
+                )
+                minhash_keys.add(key)
+            filtered: list[dict[str, Any]] = []
+            for m in raw_matches:
+                engine = m.get("engine") or m.get("match_type")
+                # Toujours garder les matches MinHash et les matches de
+                # doublon local (déjà confirmés textuellement).
+                if engine in ("minhash", "exact_duplicate", "local"):
+                    filtered.append(m)
+                    continue
+                # Pour les matches sémantiques (e5) : on ne les garde
+                # que si MinHash a confirmé pour le même (chunk, source).
+                key = (m.get("current_chunk_id"), m.get("matched_scenario_id"))
+                if key in minhash_keys:
+                    filtered.append(m)
+            dropped = len(raw_matches) - len(filtered)
+            if dropped > 0:
+                logger.info(
+                    "Dropped %s semantic-only match(es) — MinHash found no "
+                    "textual reuse on those chunks.",
+                    dropped,
+                )
+            raw_matches = filtered
+
         raw_matches = [self._ensure_match_quality(match) for match in raw_matches]
         aggregation = self._aggregate_matches(raw_matches)
 
-        # The overall similarity score must be derived from the *composite*
-        # final_score of the kept matches, not from the raw embedding average
-        # which is what ``vector_result["global_similarity_score"]`` carries.
+        # Phase 2 — Le score principal est tiré de MinHash quand le
+        # signal existe. MinHash mesure la reprise textuelle réelle, ce
+        # qui est exactement ce qu'on veut afficher comme "score de
+        # plagiat". Le composite (sémantique) ne sert plus que de
+        # filet de sécurité quand MinHash est silencieux (paraphrase
+        # pure, embeddings très divergents…).
+        minhash_best = 0.0
+        if isinstance(minhash_result, dict):
+            minhash_best = float(
+                minhash_result.get("global_similarity_score", 0.0) or 0.0
+            )
+            for m in minhash_result.get("matches", []) or []:
+                if isinstance(m, dict):
+                    minhash_best = max(
+                        minhash_best,
+                        float(m.get("minhash_score") or m.get("score") or 0.0),
+                    )
+
         best_composite = max(
             (self._match_score(m) for m in aggregation["matches"]),
             default=0.0,
         )
-        # An exact local duplicate always trumps the composite score.
         if local_exact_duplicate:
-            best_composite = max(best_composite, 1.0)
+            final_score = 1.0
+        elif minhash_best > 0:
+            # MinHash drives the headline score. We still let the
+            # composite nudge it up by a small margin if the textual
+            # signal under-shot but the merged display score is higher.
+            final_score = max(minhash_best, 0.7 * best_composite)
         else:
-            best_composite = max(best_composite, local_score)
-        final_score = best_composite
+            final_score = max(best_composite, local_score)
 
-        # Risk floor based on lexical evidence. A HIGH or VERY_HIGH bucket
-        # cannot be reached purely on a semantic score — there must be at
-        # least one match carrying real lexical / n-gram overlap.
-        has_real_overlap = any(
-            self._match_lexical(m) >= 0.20
-            or self._match_exact_overlap(m) >= 0.10
-            for m in aggregation["matches"]
-        )
-        risk = self._risk_from_score(final_score)
-        if not has_real_overlap and risk in ("high", "very_high"):
-            risk = "medium"
+        # Risk bucket : driven by MinHash directly when available
+        # (Jaccard thresholds are calibrated for textual reuse).
         if local_exact_duplicate:
             risk = "very_high"
+        elif minhash_best > 0:
+            risk = self._risk_from_minhash(minhash_best)
+        else:
+            risk = self._risk_from_score(final_score)
+            # Floor : no high/very_high without real lexical evidence.
+            has_real_overlap = any(
+                self._match_lexical(m) >= 0.20
+                or self._match_exact_overlap(m) >= 0.10
+                for m in aggregation["matches"]
+            )
+            if not has_real_overlap and risk in ("high", "very_high"):
+                risk = "medium"
 
         logger.info(
             "Final similarity for scenario_id=%s: local=%s vector=%s final=%s "
@@ -296,8 +414,13 @@ class PlagiarismPipeline:
             "duplicate_count": len(duplicate_analyses),
             "duplicate_analyses": duplicate_analyses,
             "global_similarity_score": round(final_score, 4),
+            # Phase 2 — la décision "plagiat détecté" suit MinHash en
+            # priorité : un Jaccard >= 10 % est un signal textuel fiable.
+            # Sans MinHash, on retombe sur la règle composite historique.
             "plagiarism_detected": (
-                final_score >= 0.4 or bool(aggregation["matches"])
+                local_exact_duplicate
+                or minhash_best >= 0.10
+                or (minhash_best == 0.0 and final_score >= 0.4)
             ),
             "matches": aggregation["matches"],
             "sources": aggregation["plagiarism_sources"],
@@ -314,6 +437,11 @@ class PlagiarismPipeline:
             # ``plagiarism_sources`` above).
             "local": self._slim_subresult(local_result),
             "vector": self._slim_subresult(vector_result),
+            # Phase 1 — MinHash runs alongside the embedding pipeline and
+            # its score is surfaced in the report so we can compare both
+            # verdicts on real documents. The main verdict (above) still
+            # comes from the existing semantic / composite scoring.
+            "minhash": self._slim_minhash_subresult(minhash_result),
         }
         if settings.PLAGIARISM_DIAGNOSTICS_ENABLED:
             result["diagnostics"] = self._build_plagiarism_diagnostics(
@@ -322,6 +450,43 @@ class PlagiarismPipeline:
                 aggregation=aggregation,
             )
         return result
+
+    @staticmethod
+    def _slim_minhash_subresult(
+        result: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Compact MinHash result shape for the analysis document."""
+        if not isinstance(result, dict):
+            return {
+                "engine": "minhash",
+                "global_similarity_score": 0.0,
+                "score_percent": 0,
+                "matches_count": 0,
+                "plagiarism_detected": False,
+            }
+        score = float(result.get("global_similarity_score", 0.0) or 0.0)
+        matches = result.get("matches") or []
+        # Best per-source aggregation: max jaccard per matched scenario.
+        per_source: dict[str, float] = {}
+        for m in matches:
+            if not isinstance(m, dict):
+                continue
+            sid = str(m.get("matched_scenario_id") or "")
+            if not sid:
+                continue
+            s = float(m.get("minhash_score") or m.get("score") or 0.0)
+            if s > per_source.get(sid, 0.0):
+                per_source[sid] = s
+        best = max(per_source.values(), default=score)
+        return {
+            "engine": "minhash",
+            "global_similarity_score": round(score, 4),
+            "best_source_score": round(best, 4),
+            "score_percent": format_percent(best),
+            "matches_count": len(matches),
+            "sources_count": len(per_source),
+            "plagiarism_detected": bool(result.get("plagiarism_detected")),
+        }
 
     @staticmethod
     def _slim_subresult(result: dict[str, Any]) -> dict[str, Any]:
@@ -921,6 +1086,23 @@ class PlagiarismPipeline:
         if score >= 0.55:
             return "high"
         if score >= 0.30:
+            return "medium"
+        return "low"
+
+    @staticmethod
+    def _risk_from_minhash(jaccard: float) -> str:
+        """Risk bucket derived from MinHash Jaccard.
+
+        MinHash thresholds are tighter than embedding-derived ones
+        because Jaccard on token shingles is a direct measurement of
+        textual reuse — a value above 0.25 already means a quarter of
+        the informative shingles are shared.
+        """
+        if jaccard >= 0.40:
+            return "very_high"
+        if jaccard >= 0.20:
+            return "high"
+        if jaccard >= 0.10:
             return "medium"
         return "low"
 

@@ -73,6 +73,21 @@ SCENARIO_STOPWORDS: frozenset[str] = frozenset(
         "ligne", "texte", "page", "non", "commun", "remplissage",
         "confidentiel", "confidentielle", "document",
         "scenario", "copyright", "entete", "footer", "header",
+        # --- Arabe / darija : interjections et formules ultra-frequentes
+        # dans les dialogues de scenarios marocains. Sans elles, deux
+        # scenes sans rapport partagent un micro chevauchement de
+        # dialogue ("Allo", "qu'est-ce qu'il y a", "rien", "ok"...) qui
+        # suffit a faire passer la regle de detection de faux positif.
+        # Ces tokens sont l'equivalent darija de "ouais", "ok", "hein"
+        # — purement phatiques, jamais une preuve de copie.
+        "ألو", "ألوا", "أيوا", "إيوا", "ايوا",
+        "مالك", "شنو", "كيفاش", "فين", "فينك",
+        "والو", "ماشي", "ماكاين", "ماكاينش",
+        "ايه", "أه", "أها", "أوه", "آه",
+        "لا", "نعم", "وا", "واش", "بسم", "هللا",
+        "إنشاء", "الله", "حمد", "شكرا", "حبيبي",
+        "خويا", "أختي", "أخي", "بابا", "ماما",
+        "سلام", "صباح", "مساء", "الخير", "السلام",
     }
 )
 
@@ -86,6 +101,33 @@ _WORD_RE = re.compile(r"\w+", re.UNICODE)
 # keep them whole even when shorter than 3 characters because Arabic words can
 # legitimately be short.
 _ARABIC_RE = re.compile(r"[؀-ۿ]+")
+
+# Slug lines like:
+#   108. INT. APPARTEMENT DE DOUAE / SALLE DE BAIN - SOIR
+#   100. INT. SALON / APPARTEMENT D'OMAR ET ZAHRA – JOUR
+#   EXT. RUE – NUIT
+# These appear in nearly every screenplay and consist almost entirely of
+# generic vocabulary (INT/EXT, locations, time-of-day). Keeping them in the
+# token stream inflates the lexical and n-gram scores on completely
+# unrelated scenes that happen to share a few locations. We strip them
+# *before* tokenisation so they cannot contribute to either signal.
+_SLUG_LINE_RE = re.compile(
+    r"^\s*\d{0,4}\.?\s*(?:INT|EXT|INT\.?/\s*EXT|INT/EXT)\.?[^\n]{0,200}$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def strip_slug_lines(text: str) -> str:
+    """Remove screenplay slug lines from ``text``.
+
+    A slug line opens a new scene (``INT.`` / ``EXT.`` + location + time of
+    day) and is pure generic vocabulary — stripping it prevents two
+    unrelated scenes from looking lexically similar just because they both
+    take place in an apartment at night.
+    """
+    if not text:
+        return text
+    return _SLUG_LINE_RE.sub(" ", text)
 
 
 def _strip_diacritics(token: str) -> str:
@@ -102,11 +144,14 @@ def normalize_tokens(text: str) -> list[str]:
 
     Lowercases, strips diacritics, removes scenario stopwords, drops tokens
     shorter than 3 characters unless they contain Arabic letters.
+    Screenplay slug lines are stripped first so their generic vocabulary
+    never reaches the lexical/n-gram comparison.
     """
     if not text:
         return []
+    cleaned = strip_slug_lines(text)
     tokens: list[str] = []
-    for match in _WORD_RE.finditer(text):
+    for match in _WORD_RE.finditer(cleaned):
         raw = match.group(0)
         is_arabic = _is_arabic(raw)
         normalized = _strip_diacritics(raw)
@@ -344,6 +389,28 @@ def is_likely_false_positive(scores: dict[str, float]) -> tuple[bool, str | None
             "Faux positif probable : similarité sémantique générique sans "
             "chevauchement textuel significatif."
         )
+
+    # Règle (C) — au-dessus du seuil "modéré", on exige un signal textuel
+    # réel : soit un n-gramme exact partagé non négligeable, soit une
+    # entité nommée commune (personnage, lieu propre), soit un dialogue
+    # substantiellement partagé. Sans aucun de ces trois signaux, le
+    # match repose sur du vocabulaire générique (même format scénario,
+    # même langue partagée, même registre émotionnel) — c'est
+    # précisément le profil des faux positifs où deux scènes sans
+    # rapport sont rapprochées.
+    #
+    # Les seuils sont *strictement positifs* (et non `== 0.0`) parce
+    # qu'un micro-overlap accidentel (un "Allô" partagé, un mot darija
+    # phatique) ne constitue pas une preuve de copie.
+    no_shared_text = (
+        exact < 0.10 and entities < 0.10 and dialogue < 0.15
+    )
+    if semantic >= 0.55 and no_shared_text:
+        return True, (
+            "Faux positif probable : aucun n-gramme exact, aucun personnage "
+            "et aucun dialogue partagés — proximité de style et non de contenu."
+        )
+
     return False, None
 
 

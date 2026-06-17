@@ -34,6 +34,16 @@ ROUTE_MODULES = [
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Log application startup and shutdown events."""
     logger.info("Starting SIA FastAPI application.")
+    # Build the MinHash plagiarism index from existing Qdrant chunks.
+    # Non-fatal: if datasketch / Qdrant are missing the API still starts.
+    try:
+        from backend.services.minhash_service import bootstrap_from_qdrant
+        from backend.services.vector_service import VectorService
+
+        count = bootstrap_from_qdrant(VectorService())
+        logger.info("MinHash bootstrap complete: %s chunks indexed.", count)
+    except Exception:
+        logger.exception("MinHash bootstrap failed — continuing without it.")
     yield
     close_mongodb_client()
     logger.info("Stopping SIA FastAPI application.")

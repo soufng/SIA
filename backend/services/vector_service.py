@@ -162,6 +162,7 @@ class VectorService:
                 points=points,
             )
             logger.info("Chunk vectors upserted for scenario_id=%s.", scenario_id)
+            self._mirror_to_minhash(points)
         except Exception as exc:
             logger.exception("Failed to upsert chunk vectors for scenario_id=%s.", scenario_id)
             raise RuntimeError("Failed to upsert chunk vectors") from exc
@@ -201,6 +202,39 @@ class VectorService:
         except Exception as exc:
             logger.exception("Failed to search similar chunks.")
             raise RuntimeError("Failed to search similar chunks") from exc
+
+    def _mirror_to_minhash(self, points: list[Any]) -> None:
+        """Index each upserted chunk in the in-memory MinHash LSH index.
+
+        Failures here are non-fatal: MinHash is a complementary signal,
+        and if the lib is missing the embedding pipeline must still run.
+        """
+        try:
+            from backend.services.minhash_service import MinHashIndex
+        except Exception:
+            logger.debug("MinHash module unavailable; skipping mirror.")
+            return
+        try:
+            index = MinHashIndex.get()
+            added = 0
+            for point in points:
+                payload = dict(getattr(point, "payload", None) or {})
+                text = (
+                    payload.get("chunk_text_display")
+                    or payload.get("chunk_text")
+                    or ""
+                )
+                if not text:
+                    continue
+                if index.add_chunk(
+                    key=str(point.id),
+                    text=text,
+                    payload=payload,
+                ):
+                    added += 1
+            logger.info("Mirrored %s chunks to MinHash index.", added)
+        except Exception:
+            logger.exception("Failed to mirror chunks to MinHash index.")
 
     def _query_points(self, embedding: list[float], limit: int) -> list[Any]:
         """Search Qdrant with compatibility for recent and older client APIs."""

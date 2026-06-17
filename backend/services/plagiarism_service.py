@@ -247,12 +247,51 @@ class PlagiarismService:
                 query_text=str(chunk_text or ""),
                 source_text=str(display_source),
             )
+            # Garde anti-faux-positifs sémantiques. e5-base rapproche les
+            # passages de même registre stylistique (didascalies courtes,
+            # même langue partagée, scènes intimistes) même quand aucune
+            # phrase n'est réellement copiée. Sans preuve lexicale ET sans
+            # n-gramme exact partagé, le "match" n'est qu'une proximité
+            # de style — on le drop avant qu'il ne pollue le rapport.
+            lexical_evidence = float(composite.get("lexical_score", 0.0) or 0.0)
+            exact_evidence = float(composite.get("exact_overlap_score", 0.0) or 0.0)
+            dialogue_evidence = float(
+                composite.get("dialogue_overlap_score", 0.0) or 0.0
+            )
+            entity_evidence = float(
+                composite.get("named_entity_overlap_score", 0.0) or 0.0
+            )
+            textual_evidence = lexical_evidence + exact_evidence
+            # Micro-overlap accidentel = pas une preuve. On exige un
+            # signal substantiel sur au moins un des autres axes.
+            if (
+                textual_evidence < self.MIN_TEXTUAL_EVIDENCE
+                and dialogue_evidence < 0.15
+                and entity_evidence < 0.10
+            ):
+                logger.debug(
+                    "Dropping semantic-only match for scenario_id=%s chunk=%s "
+                    "(lexical=%.3f, exact=%.3f).",
+                    scenario_id,
+                    chunk_index,
+                    lexical_evidence,
+                    exact_evidence,
+                )
+                continue
             is_false_positive, fp_reason = is_likely_false_positive(composite)
             if is_false_positive:
-                composite = dict(composite)
-                composite["final_score"] = min(
-                    float(composite.get("final_score", 0.0)), 0.30
+                # Auparavant on écrasait juste le score à 0.30 et le match
+                # restait visible. Mais ces matches n'apportent aucune
+                # information utile (style identique, contenu différent) :
+                # on les drop pour éviter de polluer le rapport.
+                logger.debug(
+                    "Dropping false-positive match for scenario_id=%s chunk=%s "
+                    "(%s).",
+                    scenario_id,
+                    chunk_index,
+                    fp_reason,
                 )
+                continue
             snippet = snippet_info["snippet"]
             matches.append(
                 {
@@ -386,6 +425,11 @@ class PlagiarismService:
 
         if top_k <= 0:
             raise ValueError("top_k must be greater than 0")
+    # Somme minimale (lexical + exact_overlap) requise pour qu'un match
+    # soit conservé. En-dessous, il n'y a aucune preuve textuelle réelle
+    # de copie — seulement une proximité de sens/style captée par e5-base.
+    MIN_TEXTUAL_EVIDENCE = 0.10
+
     LOW_INFORMATION_WORDS = {
         "the", "and", "for", "with", "that", "this", "une", "des", "les",
         "pour", "dans", "avec", "cette", "ligne", "texte", "page", "test",
