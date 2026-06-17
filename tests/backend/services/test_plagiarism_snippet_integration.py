@@ -138,6 +138,12 @@ def test_multiple_passages_get_distinct_snippets() -> None:
 
 
 def test_snippet_falls_back_when_no_meaningful_overlap() -> None:
+    """Matches with no lexical/exact/entity overlap are now dropped at the
+    filter stage (MIN_TEXTUAL_EVIDENCE + is_likely_false_positive Rule C)
+    rather than shown with a fallback snippet.  This is the correct
+    behaviour: a purely semantic proximity that shares no informative tokens
+    is not evidence of copying and must not appear in the report.
+    """
     current_chunk = "Une histoire totalement différente sur la cuisine."
     source_chunk = (
         "Page 1. Header. Aventure dans un univers de science-fiction "
@@ -166,11 +172,9 @@ def test_snippet_falls_back_when_no_meaningful_overlap() -> None:
         top_k=1,
     )
 
-    match = result["matches"][0]
-    assert match["snippet_source"] == "fallback"
-    assert match["overlap_text"] is None
-    # Detection-level score is unchanged.
-    assert match["similarity_score"] == 0.78
+    # No meaningful textual overlap → correctly filtered as a false positive.
+    assert len(result["matches"]) == 0
+    assert result["plagiarism_detected"] is False
 
 
 def test_snippet_centring_does_not_affect_similarity_score() -> None:

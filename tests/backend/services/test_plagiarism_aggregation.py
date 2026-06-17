@@ -153,6 +153,13 @@ def test_plagiarism_service_excludes_specific_scenarios() -> None:
     """Qdrant matches from excluded scenario_ids must be dropped."""
     from backend.services.plagiarism_service import PlagiarismService
 
+    # Use texts with enough shared informative tokens (5+ consecutive) so
+    # the MIN_TEXTUAL_EVIDENCE / is_likely_false_positive filters don't drop
+    # the legitimate match before the exclusion logic is exercised.
+    _shared = "Yasmine decouvre boite cachee plancher ancien grenier immeuble fouille"
+    _current = _shared + " enquete approfondie"
+    _source = _shared + " pendant inspection nocturne"
+
     embedding_service = Mock()
     embedding_service.generate_embeddings.return_value = [[0.1] * 3]
     vector_service = Mock()
@@ -163,7 +170,7 @@ def test_plagiarism_service_excludes_specific_scenarios() -> None:
             "payload": {
                 "scenario_id": "EXCLUDED",
                 "chunk_id": "EXCLUDED_0",
-                "chunk_text": "noisy self match",
+                "chunk_text": _source,
             },
         },
         {
@@ -172,7 +179,7 @@ def test_plagiarism_service_excludes_specific_scenarios() -> None:
             "payload": {
                 "scenario_id": "OTHER",
                 "chunk_id": "OTHER_0",
-                "chunk_text": "legit match",
+                "chunk_text": _source,
             },
         },
     ]
@@ -183,7 +190,7 @@ def test_plagiarism_service_excludes_specific_scenarios() -> None:
     )
     result = service.analyze_chunks(
         scenario_id="current",
-        chunks=["my chunk"],
+        chunks=[_current],
         similarity_threshold=0.5,
         top_k=5,
         excluded_scenario_ids={"EXCLUDED"},

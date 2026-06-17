@@ -4,6 +4,16 @@ import pytest
 
 from backend.services.plagiarism_service import PlagiarismService
 
+# Texts with enough shared informative tokens (5+ consecutive) to satisfy
+# the MIN_TEXTUAL_EVIDENCE filter and the is_likely_false_positive Rule C.
+# Words from SCENARIO_STOPWORDS (texte, ligne, page, salon, appartement …)
+# are filtered out before scoring, so we use unique domain vocabulary.
+_SHARED_PASSAGE = (
+    "Yasmine decouvre boite cachee plancher ancien grenier immeuble fouille"
+)
+_CURRENT_CHUNK = _SHARED_PASSAGE + " enquete approfondie"
+_SOURCE_CHUNK = _SHARED_PASSAGE + " pendant inspection nocturne"
+
 
 def build_service(
     embedding_service: Mock | None = None,
@@ -43,7 +53,7 @@ def test_analyze_chunks_returns_suspicious_matches_above_threshold() -> None:
             "payload": {
                 "scenario_id": "scenario-2",
                 "chunk_id": "scenario-2_0",
-                "chunk_text": "chunk similaire",
+                "chunk_text": _SOURCE_CHUNK,
             },
         }
     ]
@@ -51,7 +61,7 @@ def test_analyze_chunks_returns_suspicious_matches_above_threshold() -> None:
 
     result = service.analyze_chunks(
         "scenario-1",
-        ["chunk original"],
+        [_CURRENT_CHUNK],
         similarity_threshold=0.75,
         top_k=5,
     )
@@ -63,13 +73,13 @@ def test_analyze_chunks_returns_suspicious_matches_above_threshold() -> None:
     assert match["chunk_index"] == 0
     assert match["current_chunk_id"] == "scenario-1_0"
     assert match["current_chunk_index"] == 0
-    assert match["chunk_text"] == "chunk original"
+    assert match["chunk_text"] == _CURRENT_CHUNK
     assert match["matched_scenario_id"] == "scenario-2"
     assert match["matched_chunk_id"] == "scenario-2_0"
     assert match["source_chunk_id"] == "scenario-2_0"
-    assert match["matched_chunk_text"] == "chunk similaire"
-    assert match["matched_chunk_text_display"] == "chunk similaire"
-    assert match["snippet"] == "chunk similaire"
+    assert match["matched_chunk_text"] == _SOURCE_CHUNK
+    assert match["matched_chunk_text_display"] == _SOURCE_CHUNK
+    assert match["snippet"]
     assert match["current_page_number"] is None
     assert match["source_page_number"] is None
     assert match["similarity_score"] == 0.91
@@ -94,7 +104,7 @@ def test_analyze_chunks_propagates_chunk_metadata() -> None:
                 "start_offset": 100,
                 "end_offset": 150,
                 "word_count": 50,
-                "chunk_text": "chunk similaire",
+                "chunk_text": _SOURCE_CHUNK,
             },
         }
     ]
@@ -102,7 +112,7 @@ def test_analyze_chunks_propagates_chunk_metadata() -> None:
 
     result = service.analyze_chunks(
         "scenario-1",
-        ["chunk original"],
+        [_CURRENT_CHUNK],
         chunk_metadata=[
             {
                 "chunk_id": "current_3",
@@ -137,14 +147,14 @@ def test_analyze_chunks_penalizes_boilerplate_payload() -> None:
             "payload": {
                 "scenario_id": "scenario-2",
                 "chunk_id": "source_1",
-                "chunk_text": "Texte de remplissage non commun ligne page test.",
+                "chunk_text": _SOURCE_CHUNK,
                 "boilerplate_ratio": 0.8,
             },
         }
     ]
     service = build_service(embedding_service, vector_service)
 
-    result = service.analyze_chunks("scenario-1", ["chunk original"])
+    result = service.analyze_chunks("scenario-1", [_CURRENT_CHUNK])
 
     match = result["matches"][0]
     assert match["boilerplate_ratio"] == 0.8
@@ -210,7 +220,7 @@ def test_analyze_chunks_calculates_global_score_from_best_match_per_chunk() -> N
                 "payload": {
                     "scenario_id": "scenario-2",
                     "chunk_id": "scenario-2_0",
-                    "chunk_text": "match un",
+                    "chunk_text": _SOURCE_CHUNK,
                 },
             },
             {
@@ -218,7 +228,7 @@ def test_analyze_chunks_calculates_global_score_from_best_match_per_chunk() -> N
                 "payload": {
                     "scenario_id": "scenario-3",
                     "chunk_id": "scenario-3_0",
-                    "chunk_text": "match deux",
+                    "chunk_text": _SOURCE_CHUNK + " variante",
                 },
             },
         ],
@@ -226,7 +236,7 @@ def test_analyze_chunks_calculates_global_score_from_best_match_per_chunk() -> N
     ]
     service = build_service(embedding_service, vector_service)
 
-    result = service.analyze_chunks("scenario-1", ["chunk 1", "chunk 2"])
+    result = service.analyze_chunks("scenario-1", [_CURRENT_CHUNK, _CURRENT_CHUNK])
 
     assert result["global_similarity_score"] == 0.45
     assert len(result["matches"]) == 2
