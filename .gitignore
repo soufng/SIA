@@ -16,8 +16,10 @@ data/chunks/*
 data/embeddings/*
 data/reports/*
 data/backups/
+data/eval/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+!data/eval/.gitkeep
 
 # Frontend
 frontend/node_modules/
@@ -37,3 +39,10 @@ Thumbs.db
 config.toml
 builds/
 .gitlab-runner/
+.runner_system_id
+
+# Jupyter local checkpoints
+**/.ipynb_checkpoints/
+
+# Notes perso pour rédaction du rapport PFE (privé)
+PFE_DOSSIER.md

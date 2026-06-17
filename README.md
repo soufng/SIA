@@ -4,6 +4,43 @@ API et interface web pour l'analyse de scénarios PDF (CCM) : extraction,
 détection de plagiat sémantique, modération multilingue, contrôle des
 constantes nationales marocaines, rapport éditorial RAG.
 
+## Vue d'ensemble
+
+```
+                  ┌─────────────────────────────────────────────────┐
+PDF ─────────────►│ DocumentPipeline                                │
+                  │   PyMuPDF → TextCleaning → Chunking             │
+                  └────────┬────────────────────────────────────────┘
+                           │
+            ┌──────────────┼──────────────┬─────────────────┐
+            ▼              ▼              ▼                 ▼
+   ┌────────────────┐ ┌──────────┐ ┌─────────────┐ ┌──────────────────┐
+   │ Plagiat        │ │ Modé-    │ │ Constantes  │ │ Rapport RAG      │
+   │ ─────────      │ │ ration   │ │ marocaines  │ │ (Ollama / OpenAI │
+   │ ┌────────────┐ │ │ (FR / AR │ │ (drapeau,   │ │  / Anthropic)    │
+   │ │ MinHash    │ │ │ /darija) │ │  hymne, …)  │ │                  │
+   │ │ ↔ LSH      │ │ └──────────┘ └─────────────┘ └──────────────────┘
+   │ │ Jaccard    │ │
+   │ └────────────┘ │           (modules parallèles)
+   │ ┌────────────┐ │
+   │ │ e5 + Qdrant│ │
+   │ │ cosinus    │ │
+   │ └────────────┘ │
+   │ ┌────────────┐ │
+   │ │ Local hash │ │
+   │ │ doublon    │ │
+   │ └────────────┘ │
+   └────────┬───────┘
+            ▼
+   ┌────────────────────────────────────────────────────────────────┐
+   │ Verdict combiné + filtrage des matches sémantiques sans preuve │
+   │ → Rapport HTML / PDF + persistance MongoDB                     │
+   └────────────────────────────────────────────────────────────────┘
+```
+
+Détail du sous-système plagiat dans
+[docs/PLAGIARISM_PIPELINE.md](docs/PLAGIARISM_PIPELINE.md).
+
 ## Stack
 
 | Couche | Technologie |
@@ -15,6 +52,110 @@ constantes nationales marocaines, rapport éditorial RAG.
 | Embeddings | Sentence Transformers — `intfloat/multilingual-e5-base` (768d) |
 | PDF | PyMuPDF (backend) · jsPDF (client) |
 | LLM (optionnel) | Ollama (`llama3.2:3b`) · OpenAI · Anthropic |
+| Plagiat textuel | `datasketch` — MinHash 128 perm. + LSH (Jaccard sur shingles) |
+
+## Détection de plagiat — pipeline hybride
+
+La détection repose sur **deux moteurs complémentaires** qui tournent en
+parallèle puis se combinent au moment du verdict. Cette architecture
+résout le problème classique des moteurs purement sémantiques sur
+corpus stylistiquement homogène (ici, des scénarios marocains : même
+format, même mélange FR / arabe / darija, même registre dramatique).
+
+### 1. Moteur MinHash (signal **principal**)
+
+Mesure la **reprise textuelle réelle** — c'est l'équivalent maison de ce
+que Turnitin / Copyleaks utilisent en production.
+
+```
+Chunk PDF
+   ↓ tokenisation + suppression stopwords (slug lines, boilerplate darija)
+   ↓ shingles 5-grammes
+   ↓ MinHash 128 permutations  (datasketch.MinHash)
+   ↓ insertion dans l'index LSH partagé (datasketch.MinHashLSH)
+   ↓
+   Search → candidats avec Jaccard estimé ≥ 0.05
+   ↓ Jaccard exact recalculé
+   ↓ ≥ 10 % → match conservé
+```
+
+- **Index** : en mémoire, par worker uvicorn. Bootstrappé depuis
+  Qdrant au démarrage et **resynchronisé à chaque analyse** (les
+  nouveaux chunks upsertés par un worker arrivent à l'autre via la
+  prochaine sync — voir [`minhash_service.py`](backend/services/minhash_service.py)).
+- **Persistance** : aucune. Qdrant reste la source de vérité ; un
+  `reset_all.ps1` qui vide Qdrant invalide aussi l'index MinHash au
+  prochain démarrage.
+- **Tolérance aux pannes** : si `datasketch` est absent ou si Qdrant
+  est injoignable, le pipeline retombe silencieusement sur le seul
+  signal sémantique (Phase 1 de la migration restée fonctionnelle).
+
+### 2. Moteur sémantique (signal **secondaire**)
+
+Embeddings e5-base 768d + Qdrant cosine, complété par un **composite
+scoring** qui combine lexical (Jaccard sur tokens), n-grammes exacts,
+overlap d'entités nommées et dialogues. Voir
+[`composite_scoring.py`](backend/utils/composite_scoring.py).
+
+Ce moteur capture **la proximité de sens et de style** — il est très
+sensible aux scénarios du même registre, ce qui produisait
+historiquement beaucoup de faux positifs. Il sert désormais à confirmer
+les matches MinHash et à détecter les **paraphrases pures** (réécriture
+totale sans réutilisation textuelle).
+
+### Verdict combiné
+
+Le score affiché en haut du rapport est dérivé de MinHash dès que ce
+moteur trouve quelque chose :
+
+| MinHash Jaccard | Niveau de risque |
+|---|---|
+| ≥ 40 % | **very_high** — copie quasi-verbatim |
+| ≥ 20 % | **high** — reprise substantielle |
+| ≥ 10 % | **medium** — paraphrase ou copie partielle |
+| < 10 % | **low** — pas de plagiat textuel |
+
+Le verdict UI ([`ResultsPage.tsx`](frontend/src/pages/ResultsPage.tsx))
+croise les deux scores :
+
+| MinHash | Sémantique | Verdict |
+|---|---|---|
+| ≥ 25 % | — | 🔴 *Plagiat textuel confirmé* |
+| 10–25 % + sém. ≥ 30 % | | 🟡 *Reprise partielle ou paraphrase* |
+| < 10 % + sém. ≥ 30 % | | 🟢 *Ressemblance de style — pas un plagiat* |
+| < 10 % + sém. < 30 % | | 🟢 *Aucun plagiat textuel détecté* |
+
+### Filtrage des matches affichés
+
+Quand MinHash retourne un score nul (vrai négatif sémantique), tous les
+matches issus uniquement du moteur e5 sont **filtrés du rapport**
+([`plagiarism_pipeline.py`](backend/pipelines/plagiarism_pipeline.py)).
+On évite ainsi de polluer le rapport avec des lignes "35 % MODÉRÉ" qui
+contrediraient visuellement le verdict "pas un plagiat" affiché en
+haut. Les seuls matches qui passent ce filtre sont ceux qu'au moins un
+des trois signaux confirme : MinHash, doublon exact, hash de fichier.
+
+### Affinage et knobs
+
+| Constante | Lieu | Effet |
+|---|---|---|
+| `SHINGLE_SIZE` | [`minhash_service.py`](backend/services/minhash_service.py) | Taille du shingle (défaut 5). Plus court = plus sensible aux copies partielles. |
+| `NUM_PERM` | idem | Précision de la signature MinHash (défaut 128). |
+| `LSH_THRESHOLD` | idem | Filtre LSH lâche (défaut 0.05). Le filtrage fin se fait après. |
+| `DEFAULT_MIN_JACCARD` | [`minhash_plagiarism_service.py`](backend/services/minhash_plagiarism_service.py) | Seuil minimal pour qu'un match soit reporté (défaut 0.10). |
+| `SIA_PLAGIARISM_MAX_MATCHES_PER_SOURCE` | env | Plafond d'affichage par source (défaut 20). |
+| `SIA_PLAGIARISM_MAX_TOTAL_MATCHES_DISPLAYED` | env | Plafond total (défaut 100). |
+
+### Crédibilité — validation empirique
+
+Quatre cas de référence validés (voir conversation de mise au point) :
+
+| Cas | MinHash | Verdict | Correct ? |
+|---|---|---|---|
+| Paraphrase volontaire (Villa A vs Villa B — noms changés, intrigue identique) | 76 % | 🔴 Plagiat confirmé | ✅ |
+| Deux drames marocains sans rapport (Omar/Zahra vs Douae/Hiba) | 0 % | 🟢 Pas un plagiat | ✅ |
+| Scénario avec deux passages copiés depuis une autre source | 25 % (peak 57 %) | 🔴 Plagiat confirmé | ✅ |
+| Doublon exact (même PDF) | 100 % via hash | 🔴 Doublon exact | ✅ |
 
 ## Démarrage rapide en développement
 
@@ -49,6 +190,8 @@ Variables non-évidentes :
 | `SIA_ENV` | `development` (défaut) ou `production`. En prod, l'API refuse de démarrer avec les secrets par défaut. |
 | `SIA_UPLOAD_MAX_MB` | Taille max d'un PDF accepté (défaut : 20 Mo). |
 | `SIA_PLAGIARISM_SIMILARITY_THRESHOLD` | Seuil cosine pour qu'un match Qdrant soit retenu (défaut : 0.60). |
+| `SIA_PLAGIARISM_MAX_MATCHES_PER_SOURCE` | Plafond d'affichage par source dans le rapport (défaut : 20). |
+| `SIA_PLAGIARISM_MAX_TOTAL_MATCHES_DISPLAYED` | Plafond total de matches affichés (défaut : 100). |
 | `SIA_RATE_LIMIT_STORAGE` | `memory://` (défaut, mono-instance) ou `redis://host:6379` pour du multi-worker. |
 | `SIA_RAG_LLM_PROVIDER` | `ollama` / `openai` / `anthropic` / `none`. Tombe sur un template déterministe si l'API est injoignable. |
 
@@ -159,6 +302,7 @@ backend/
   api/v1/routes/        Endpoints FastAPI
   pipelines/            DocumentPipeline · PlagiarismPipeline · ModerationPipeline
   services/             Services métier (e5, Qdrant, RAG, LLM provider, …)
+                        + minhash_service (index LSH), minhash_plagiarism_service
   services/pipelines/   PrincipesMarocPipeline (constantes nationales)
   repositories/         AnalysisRepository · JobsRepository (MongoDB)
   core/                 config, auth, rate_limit, totp, exceptions
