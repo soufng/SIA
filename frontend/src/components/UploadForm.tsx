@@ -43,14 +43,22 @@ const FALLBACK_STAGE_LABEL = "Préparation de l'analyse";
 // quand on s'en approche — la barre ne se fige donc jamais visuellement,
 // et elle est toujours rattrapée si le backend remonte plus.
 const SMOOTHING_INTERVAL_MS = 250;
-const CREEP_APPROACH_RATIO = 0.02; // par tick : 2 % de la distance restante
-const CREEP_MIN_PER_TICK = 0.05; // mouvement minimal — discret quand on s'approche du cap
-const CREEP_HARD_CAP = 99; // tant que le backend n'a pas dit "completed", on continue d'avancer
-// Au-delà de ce seuil on ralentit fortement la progression pour éviter
-// que la barre n'atteigne visuellement 99 % alors que le backend n'est
-// pas encore prêt à dire "completed".
+// Progression LINEAIRE par zone, calibree pour qu'une analyse complete
+// (~4 min apres la factorisation des embeddings) voie la barre arriver
+// naturellement vers 99 % en fin de job sans jamais stagner. Le tick
+// est de 250 ms, soit 4 ticks/s.
+//
+//   Zone 1 (0  → 60 %) :  ~2 min     (0.5 %/s)
+//   Zone 2 (60 → 90 %) :  ~1 min 15 s (0.42 %/s)
+//   Zone 3 (90 → 99 %) :  ~45 s      (0.2 %/s)
+//   Total approximatif :  ~4 min
+const CREEP_HARD_CAP = 99;
+const CREEP_EARLY_ZONE = 60;
 const CREEP_SLOW_ZONE = 90;
-const CREEP_SLOW_RATIO = 0.004; // ~0,4 % de la distance restante par tick
+// Incrément absolu par tick (et non pourcentage de la distance restante).
+const CREEP_EARLY_PER_TICK = 0.125; // 0.5 %/s
+const CREEP_MID_PER_TICK = 0.104; // 0.42 %/s
+const CREEP_SLOW_PER_TICK = 0.05; // 0.2 %/s
 
 type JobUiStatus = "uploading" | "queued" | "running" | "completed" | "failed";
 
@@ -126,18 +134,18 @@ export function UploadForm() {
           // toujours un mouvement même si le backend ne remonte pas
           // d'update pendant plusieurs secondes.
           if (j.displayPct >= CREEP_HARD_CAP) return j;
+          // Increment LINEAIRE par zone — predictible, pas d'asymptote
+          // qui ralentit aleatoirement.
+          let perTick: number;
+          if (j.displayPct >= CREEP_SLOW_ZONE) {
+            perTick = CREEP_SLOW_PER_TICK;
+          } else if (j.displayPct >= CREEP_EARLY_ZONE) {
+            perTick = CREEP_MID_PER_TICK;
+          } else {
+            perTick = CREEP_EARLY_PER_TICK;
+          }
           const remaining = CREEP_HARD_CAP - j.displayPct;
-          // Deux régimes : avancée nette tant qu'on est sous la
-          // ``slow zone``, puis micro-mouvements continus au-delà pour
-          // que la barre ne paraisse jamais figée même sur un scénario
-          // long. L'incrément reste plafonné par la distance restante.
-          const inSlowZone = j.displayPct >= CREEP_SLOW_ZONE;
-          const ratio = inSlowZone ? CREEP_SLOW_RATIO : CREEP_APPROACH_RATIO;
-          const minTick = inSlowZone ? 0.02 : CREEP_MIN_PER_TICK;
-          const increment = Math.min(
-            remaining,
-            Math.max(minTick, remaining * ratio),
-          );
+          const increment = Math.min(remaining, perTick);
           changed = true;
           return {
             ...j,
@@ -254,10 +262,18 @@ export function UploadForm() {
         if (j.status !== "running" && nextStatus === "running") {
           pollStartedAtRef.current.set(uid, Date.now());
         }
+        // Important : on NE pousse PAS le ``progress`` directement
+        // dans ``displayPct``. Sinon, des que le backend remonte un
+        // palier (ex. 40 % apres l'extraction), la barre saute
+        // instantanement et donne l'impression que l'analyse est
+        // presque finie en 2-3 secondes alors qu'elle vient juste de
+        // demarrer. La progression visuelle est entierement geree
+        // par le creep client (boucle ci-dessus), qui monte avec un
+        // rythme controle. ``progressPct`` reste stocke uniquement
+        // pour le libelle d'etape et les logs.
         return {
           ...j,
           progressPct: progress,
-          displayPct: Math.max(j.displayPct, progress),
           stageLabel: stage,
           status: nextStatus,
         };
