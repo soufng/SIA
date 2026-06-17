@@ -1769,6 +1769,152 @@ function ExactDuplicatePanel({
   );
 }
 
+function SemanticOnlyBanner({ plagiarism }: { plagiarism: Plagiarism }) {
+  // Only show when MinHash says "no textual reuse" but the semantic
+  // engine still surfaced matches — without context the user could
+  // wrongly read the per-match "35% MODÉRÉ" as a plagiarism signal.
+  const minhashPct =
+    plagiarism.minhash?.score_percent ??
+    Math.round(100 * Number(plagiarism.minhash?.best_source_score ?? 0));
+  const semanticPct = Math.round(
+    100 * Number(plagiarism.global_similarity_score ?? plagiarism.score ?? 0),
+  );
+  const hasMatches =
+    (plagiarism.matches?.length ?? 0) > 0 ||
+    (plagiarism.plagiarism_sources?.length ?? 0) > 0;
+  const isExactDup = Boolean(plagiarism.exact_duplicate);
+
+  if (isExactDup) return null;
+  if (!hasMatches) return null;
+  if (minhashPct >= 10) return null; // MinHash already raised an alarm
+  if (semanticPct < 20) return null; // nothing notable to explain
+
+  return (
+    <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+      <div className="font-semibold">
+        Pourquoi ces passages s'affichent malgré l'absence de plagiat ?
+      </div>
+      <p className="mt-1 leading-relaxed">
+        Ces extraits ont été repérés par le moteur sémantique (e5) parce
+        qu'ils partagent un <strong>style scénaristique</strong> (didascalies,
+        mélange FR / arabe / darija, registre dramatique). Le moteur MinHash
+        confirme qu'<strong>aucun contenu textuel</strong> n'est réellement
+        repris — ils sont affichés ici à titre informatif uniquement et ne
+        constituent pas un plagiat.
+      </p>
+    </div>
+  );
+}
+
+function DualScorePanel({ plagiarism }: { plagiarism: Plagiarism }) {
+  const semantic = Math.round(
+    100 * Number(plagiarism.global_similarity_score ?? plagiarism.score ?? 0),
+  );
+  const minhash = plagiarism.minhash;
+  const minhashPct =
+    minhash?.score_percent ??
+    Math.round(100 * Number(minhash?.best_source_score ?? 0));
+  const minhashAvailable = Boolean(minhash);
+
+  const verdict = (() => {
+    if (!minhashAvailable) return null;
+    if (minhashPct >= 25) {
+      return {
+        label: "Plagiat textuel confirmé",
+        tone: "bg-red-50 text-red-800 ring-red-200",
+        detail:
+          "Les deux moteurs convergent : extraits réellement copiés du document source.",
+      };
+    }
+    if (minhashPct >= 10 && semantic >= 30) {
+      return {
+        label: "Reprise partielle ou paraphrase",
+        tone: "bg-amber-50 text-amber-900 ring-amber-200",
+        detail:
+          "Partage textuel modeste avec proximité sémantique : probable paraphrase.",
+      };
+    }
+    if (semantic >= 30 && minhashPct < 10) {
+      return {
+        label: "Ressemblance de style — pas un plagiat",
+        tone: "bg-emerald-50 text-emerald-800 ring-emerald-200",
+        detail:
+          "Score sémantique élevé mais aucun extrait réellement repris : même registre, contenu différent.",
+      };
+    }
+    return {
+      label: "Aucun plagiat textuel détecté",
+      tone: "bg-emerald-50 text-emerald-800 ring-emerald-200",
+      detail: "Ni reprise littérale ni paraphrase significative.",
+    };
+  })();
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <ScoreTile
+          label="Plagiat textuel"
+          sublabel="MinHash — fingerprint lexical"
+          value={minhashAvailable ? minhashPct : null}
+          accent="bg-ccm-red"
+          help="Pourcentage de séquences de mots réellement partagées avec un document source. C'est l'indicateur de copie."
+        />
+        <ScoreTile
+          label="Similarité sémantique"
+          sublabel="Embeddings e5-base"
+          value={semantic}
+          accent="bg-slate-400"
+          help="Proximité de sens et de style. Élevé sur deux scénarios du même registre, même sans aucune copie."
+        />
+      </div>
+      {verdict && (
+        <div
+          className={`mt-3 rounded-md px-3 py-2 text-xs font-medium ring-1 ${verdict.tone}`}
+        >
+          <div className="font-semibold">{verdict.label}</div>
+          <div className="mt-0.5 font-normal opacity-90">{verdict.detail}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScoreTile({
+  label,
+  sublabel,
+  value,
+  accent,
+  help,
+}: {
+  label: string;
+  sublabel: string;
+  value: number | null;
+  accent: string;
+  help: string;
+}) {
+  const pct = value ?? 0;
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-3">
+      <div className="flex items-baseline justify-between">
+        <div>
+          <div className="text-sm font-semibold text-ccm-ink">{label}</div>
+          <div className="text-[11px] text-slate-500">{sublabel}</div>
+        </div>
+        <div className="font-mono tabular-nums text-2xl font-bold text-ccm-ink">
+          {value === null ? "—" : `${pct}%`}
+        </div>
+      </div>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+        <div
+          className={`h-full ${accent} transition-[width] duration-500`}
+          style={{ width: `${value === null ? 0 : Math.min(100, pct)}%` }}
+        />
+      </div>
+      <p className="mt-2 text-[11px] leading-snug text-slate-500">{help}</p>
+    </div>
+  );
+}
+
 function PlagiarismSection({ plagiarism }: { plagiarism: Plagiarism }) {
   const [showAllSources, setShowAllSources] = useState(false);
   const [flatExpanded, setFlatExpanded] = useState(false);
@@ -1835,7 +1981,7 @@ function PlagiarismSection({ plagiarism }: { plagiarism: Plagiarism }) {
             <span>
               Analyse plagiat
               <span className="ml-2 text-xs font-normal text-slate-500">
-                Recherche par similarité sémantique
+                Plagiat textuel (MinHash) + similarité sémantique
               </span>
             </span>
           </CardTitle>
@@ -1866,6 +2012,7 @@ function PlagiarismSection({ plagiarism }: { plagiarism: Plagiarism }) {
         )}
       </CardHeader>
       <CardContent className="relative space-y-5">
+        <DualScorePanel plagiarism={plagiarism} />
         {exactDuplicate && (
           <ExactDuplicatePanel
             duplicateCount={duplicateCount}

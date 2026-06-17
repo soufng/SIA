@@ -93,6 +93,20 @@ export interface Plagiarism {
   displayed_sources?: number;
   is_truncated?: boolean;
   risk?: string;
+  // MinHash (lexical fingerprinting) — exposé en parallèle du score
+  // sémantique. ``best_source_score`` est le Jaccard MinHash maximal sur
+  // l'ensemble des sources matchées : c'est l'indicateur de plagiat
+  // textuel réel, beaucoup plus fiable que la similarité sémantique sur
+  // des scénarios écrits dans le même style.
+  minhash?: {
+    engine?: string;
+    global_similarity_score?: number;
+    best_source_score?: number;
+    score_percent?: number;
+    matches_count?: number;
+    sources_count?: number;
+    plagiarism_detected?: boolean;
+  };
 }
 
 export interface VulgarityMatch {

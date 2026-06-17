@@ -809,7 +809,7 @@ export function HomePage() {
       {/* ---------- Upload + last analysis ---------- */}
       <section
         id="upload-form"
-        className="grid grid-cols-1 gap-6 lg:grid-cols-2 scroll-mt-24"
+        className="flex flex-col gap-6 scroll-mt-24"
       >
         <UploadForm />
         <Card>
@@ -845,7 +845,7 @@ export function HomePage() {
                 <StatusCards analysis={analysis} />
               ) : (
                 <Alert variant="info">
-                  Chargez un fichier PDF a gauche pour lancer une analyse
+                  Chargez un fichier PDF ci-dessus pour lancer une analyse
                   complete : extraction, embeddings, plagiat, modération et
                   rapport RAG.
                 </Alert>

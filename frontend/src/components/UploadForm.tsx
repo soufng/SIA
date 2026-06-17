@@ -1,25 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  BarChart3,
   CheckCircle2,
-  Circle,
   Clock,
-  Database,
-  FileText,
-  Landmark,
-  Layers,
   Loader2,
-  Search,
-  ShieldAlert,
   Upload as UploadIcon,
   XCircle,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { Button } from "./ui/button";
 import { Alert } from "./ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { cn } from "@/lib/utils";
 import {
   analyzeMultiplePdfsAsync,
   analyzePdfAsync,
@@ -31,6 +21,10 @@ import { useAnalysisStore } from "@/store/analysis";
 // Délai entre deux requêtes de polling (ms). Court mais raisonnable pour
 // que la barre de progression soit fluide sans noyer le backend.
 const POLL_INTERVAL_MS = 1200;
+
+// Limite UI : on plafonne la sélection à 5 PDF par analyse pour éviter
+// de saturer la pipeline (chaque PDF lance un job complet en parallèle).
+const MAX_FILES_PER_ANALYSIS = 5;
 
 // Plafond avant qu'on déclare le job perdu côté UI (ms). Le worker peut
 // quand même finir en arrière-plan et apparaître dans l'historique.
@@ -49,38 +43,14 @@ const FALLBACK_STAGE_LABEL = "Préparation de l'analyse";
 // quand on s'en approche — la barre ne se fige donc jamais visuellement,
 // et elle est toujours rattrapée si le backend remonte plus.
 const SMOOTHING_INTERVAL_MS = 250;
-const CREEP_APPROACH_RATIO = 0.018; // par tick : 1,8 % de la distance restante
-const CREEP_MIN_PER_TICK = 0.12; // garantit un mouvement visible même près du cap
-const CREEP_HARD_CAP = 96; // tant que le backend n'a pas dit "completed"
-
-// Pipeline UI map — voir commentaire historique : on déduit l'étape
-// courante de ``progress_pct``.
-interface PipelineStep {
-  key: string;
-  label: string;
-  icon: LucideIcon;
-  range: [number, number];
-}
-
-const PIPELINE_STEPS: PipelineStep[] = [
-  { key: "upload", label: "Réception et préparation du fichier", icon: UploadIcon, range: [0, 10] },
-  { key: "extract", label: "Extraction et nettoyage du PDF", icon: FileText, range: [10, 30] },
-  { key: "chunk", label: "Segmentation et embeddings (e5-base)", icon: Layers, range: [30, 50] },
-  { key: "plagiarism", label: "Détection de plagiat (Qdrant)", icon: Search, range: [50, 65] },
-  { key: "moderation", label: "Modération multilingue (FR / AR / Darija)", icon: ShieldAlert, range: [65, 78] },
-  { key: "constants", label: "Vérification des constantes marocaines", icon: Landmark, range: [78, 85] },
-  { key: "rag", label: "Synthèse RAG et rapport éditorial", icon: BarChart3, range: [85, 95] },
-  { key: "persist", label: "Enregistrement de l'analyse", icon: Database, range: [95, 100] },
-];
-
-function getStepStatus(
-  step: PipelineStep,
-  progressPct: number,
-): "done" | "active" | "pending" {
-  if (progressPct >= step.range[1]) return "done";
-  if (progressPct >= step.range[0]) return "active";
-  return "pending";
-}
+const CREEP_APPROACH_RATIO = 0.02; // par tick : 2 % de la distance restante
+const CREEP_MIN_PER_TICK = 0.05; // mouvement minimal — discret quand on s'approche du cap
+const CREEP_HARD_CAP = 99; // tant que le backend n'a pas dit "completed", on continue d'avancer
+// Au-delà de ce seuil on ralentit fortement la progression pour éviter
+// que la barre n'atteigne visuellement 99 % alors que le backend n'est
+// pas encore prêt à dire "completed".
+const CREEP_SLOW_ZONE = 90;
+const CREEP_SLOW_RATIO = 0.004; // ~0,4 % de la distance restante par tick
 
 type JobUiStatus = "uploading" | "queued" | "running" | "completed" | "failed";
 
@@ -157,9 +127,16 @@ export function UploadForm() {
           // d'update pendant plusieurs secondes.
           if (j.displayPct >= CREEP_HARD_CAP) return j;
           const remaining = CREEP_HARD_CAP - j.displayPct;
-          const increment = Math.max(
-            CREEP_MIN_PER_TICK,
-            remaining * CREEP_APPROACH_RATIO,
+          // Deux régimes : avancée nette tant qu'on est sous la
+          // ``slow zone``, puis micro-mouvements continus au-delà pour
+          // que la barre ne paraisse jamais figée même sur un scénario
+          // long. L'incrément reste plafonné par la distance restante.
+          const inSlowZone = j.displayPct >= CREEP_SLOW_ZONE;
+          const ratio = inSlowZone ? CREEP_SLOW_RATIO : CREEP_APPROACH_RATIO;
+          const minTick = inSlowZone ? 0.02 : CREEP_MIN_PER_TICK;
+          const increment = Math.min(
+            remaining,
+            Math.max(minTick, remaining * ratio),
           );
           changed = true;
           return {
@@ -179,18 +156,28 @@ export function UploadForm() {
       f.name.toLowerCase().endsWith(".pdf"),
     );
     if (pdfs.length === 0) return;
+    let truncated = false;
     setFiles((prev) => {
       const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
       const merged = [...prev];
       for (const f of pdfs) {
         const key = `${f.name}:${f.size}`;
         if (!seen.has(key)) {
+          if (merged.length >= MAX_FILES_PER_ANALYSIS) {
+            truncated = true;
+            break;
+          }
           seen.add(key);
           merged.push(f);
         }
       }
       return merged;
     });
+    if (truncated) {
+      setSubmitError(
+        `Limite atteinte : maximum ${MAX_FILES_PER_ANALYSIS} fichiers PDF par analyse.`,
+      );
+    }
   };
 
   const removeFile = (index: number) => {
@@ -420,6 +407,9 @@ export function UploadForm() {
           <p className="text-xs text-slate-500">
             Chaque PDF est analysé séparément par la pipeline complète.
           </p>
+          <p className="mt-1 text-[11px] font-medium text-ccm-red">
+            Max 5 fichiers PDF par analyse.
+          </p>
           <input
             ref={inputRef}
             type="file"
@@ -639,53 +629,6 @@ function SingleJobProgress({ job }: { job: JobTracker }) {
           ? `Job ${job.jobId.slice(0, 8)} — l'analyse se déroule côté serveur. La progression vient du backend.`
           : "Envoi du fichier en cours..."}
       </p>
-
-      <ol className="mt-3 space-y-1.5 rounded-md border border-slate-200 bg-slate-50/60 p-3">
-        {PIPELINE_STEPS.map((step) => {
-          const status = getStepStatus(step, job.displayPct);
-          const Icon = step.icon;
-          return (
-            <li
-              key={step.key}
-              className={cn(
-                "flex items-center gap-2.5 text-[12px] transition-colors",
-                status === "done" && "text-emerald-700",
-                status === "active" && "text-ccm-red font-medium",
-                status === "pending" && "text-slate-400",
-              )}
-            >
-              <span
-                className={cn(
-                  "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors",
-                  status === "done" && "bg-emerald-100 text-emerald-700",
-                  status === "active" && "bg-ccm-red/10 text-ccm-red",
-                  status === "pending" && "bg-slate-200 text-slate-400",
-                )}
-              >
-                {status === "done" ? (
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                ) : status === "active" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Circle className="h-3.5 w-3.5" />
-                )}
-              </span>
-              <Icon
-                className={cn(
-                  "h-3.5 w-3.5 shrink-0 transition-opacity",
-                  status === "pending" && "opacity-60",
-                )}
-              />
-              <span className="truncate">{step.label}</span>
-              {status === "active" && (
-                <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-ccm-red/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ccm-red">
-                  en cours
-                </span>
-              )}
-            </li>
-          );
-        })}
-      </ol>
     </div>
   );
 }
