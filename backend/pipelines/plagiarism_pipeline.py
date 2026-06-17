@@ -46,6 +46,9 @@ class PlagiarismOutcome:
     plagiarism_result: dict[str, Any]
     strict_match: dict[str, Any]
     vector_available: bool
+    # Embeddings pre-calcules pour les chunks du document courant.
+    # Transmis a ``store_vectors`` afin d'eviter une seconde passe e5.
+    precomputed_embeddings: list[list[float]] | None = None
 
 
 class PlagiarismPipeline:
@@ -119,6 +122,28 @@ class PlagiarismPipeline:
             current_scenario_id=document.scenario_id,
             duplicate_analyses=local_result.get("duplicate_analyses"),
         )
+        # Optimisation : on genere les embeddings UNE SEULE FOIS et on
+        # les reutilise a la fois pour la recherche plagiat ET pour le
+        # stockage Qdrant. Avant cette factorisation, e5-base etait
+        # appele deux fois sur les memes chunks (passe query + passe
+        # passage), ce qui doublait le cout d'embedding (~30 s pour un
+        # scenario de 148 chunks sur CPU).
+        precomputed_embeddings: list[list[float]] | None = None
+        try:
+            logger.info(
+                "Generating embeddings once for both plagiarism search "
+                "and Qdrant storage (%s chunks).",
+                len(document.chunks),
+            )
+            precomputed_embeddings = self.embedding_service.generate_embeddings(
+                document.chunks
+            )
+        except Exception:
+            logger.exception(
+                "Pre-computing embeddings failed — falling back to "
+                "per-stage generation."
+            )
+
         vector_result, vector_available = self._analyze_vector_plagiarism(
             scenario_id=document.scenario_id,
             chunks=document.chunks,
@@ -127,6 +152,7 @@ class PlagiarismPipeline:
             warnings=warnings,
             excluded_scenario_ids=excluded_scenario_ids,
             chunk_metadata=document.chunk_metadata,
+            precomputed_embeddings=precomputed_embeddings,
         )
         # MinHash lexical fingerprint pass. Runs in parallel with the
         # embedding pipeline; the result is exposed alongside the
@@ -167,6 +193,7 @@ class PlagiarismPipeline:
             plagiarism_result=plagiarism_result,
             strict_match=strict_match,
             vector_available=vector_available,
+            precomputed_embeddings=precomputed_embeddings,
         )
 
     def store_vectors(
@@ -174,8 +201,14 @@ class PlagiarismPipeline:
         document: "DocumentContext",
         vector_available: bool,
         warnings: list[str],
+        precomputed_embeddings: list[list[float]] | None = None,
     ) -> None:
-        """Persist the document's chunks in Qdrant for future analyses."""
+        """Persist the document's chunks in Qdrant for future analyses.
+
+        Si ``precomputed_embeddings`` est fourni (par ex. issu de la
+        passe plagiat sur le meme document), on les reutilise au lieu
+        de regenerer 148+ vecteurs identiques.
+        """
         if not vector_available:
             logger.warning(
                 "Skipping vector storage because Qdrant is unavailable. "
@@ -184,7 +217,18 @@ class PlagiarismPipeline:
             )
             return
         try:
-            embeddings = self.embedding_service.generate_embeddings(document.chunks)
+            if precomputed_embeddings is not None and len(
+                precomputed_embeddings
+            ) == len(document.chunks):
+                embeddings = precomputed_embeddings
+                logger.info(
+                    "Reusing %s precomputed embeddings for Qdrant upsert.",
+                    len(embeddings),
+                )
+            else:
+                embeddings = self.embedding_service.generate_embeddings(
+                    document.chunks
+                )
             stored_filename = Path(document.file_path).name if document.file_path else None
             self.vector_service.upsert_chunks(
                 scenario_id=document.scenario_id,
@@ -1168,6 +1212,7 @@ class PlagiarismPipeline:
         warnings: list[str],
         excluded_scenario_ids: set[str] | None = None,
         chunk_metadata: list[dict[str, Any]] | None = None,
+        precomputed_embeddings: list[list[float]] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Run plagiarism detection, returning an unavailable result if Qdrant fails."""
         try:
@@ -1178,6 +1223,7 @@ class PlagiarismPipeline:
                 top_k=top_k,
                 excluded_scenario_ids=excluded_scenario_ids,
                 chunk_metadata=chunk_metadata,
+                precomputed_embeddings=precomputed_embeddings,
             )
             return plagiarism_result, True
         except Exception as exc:

@@ -287,6 +287,7 @@ class AnalysisService:
                 document=document,
                 vector_available=plagiarism_outcome.vector_available,
                 warnings=warnings,
+                precomputed_embeddings=plagiarism_outcome.precomputed_embeddings,
             )
 
             # Slim chunk payload kept so AdvancedRAGService can re-query

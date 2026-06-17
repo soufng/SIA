@@ -35,6 +35,13 @@ class MinHashPlagiarismService:
     def __init__(self, index: MinHashIndex | None = None) -> None:
         self.index = index or MinHashIndex.get()
 
+    # Si un sync a deja eu lieu depuis moins de SYNC_THROTTLE_SECONDS,
+    # on saute l'appel a Qdrant : on n'est probablement pas en retard de
+    # plus que cela sur les chunks upsertes par un autre worker, et le
+    # cout d'un scroll complet sur ~500 chunks par analyse est trop
+    # eleve pour qu'on le paie a chaque appel.
+    SYNC_THROTTLE_SECONDS = 30.0
+
     def _ensure_bootstrapped(self) -> None:
         """Keep this worker's MinHash index in sync with Qdrant.
 
@@ -42,23 +49,37 @@ class MinHashPlagiarismService:
         ``MinHashIndex`` singleton. A document upserted via worker A
         only lands in worker A's index — worker B would miss it until
         it scrolls Qdrant. We therefore do an *incremental* sync at the
-        start of every analysis: ``add_chunk`` is a no-op for keys we
-        already have, so this stays cheap once the index is warm.
+        start of every analysis, but throttled : un scroll Qdrant toutes
+        les ``SYNC_THROTTLE_SECONDS`` au plus.
         """
+        # First call ever: full bootstrap (no throttle).
+        if not self.index.is_bootstrapped():
+            self._do_sync(reason="first-call")
+            return
+        # Throttle : on saute si on a deja sync recemment.
+        elapsed = self.index.seconds_since_last_sync()
+        if elapsed < self.SYNC_THROTTLE_SECONDS:
+            logger.debug(
+                "MinHash sync skipped (last %.1fs ago, throttle %.0fs).",
+                elapsed,
+                self.SYNC_THROTTLE_SECONDS,
+            )
+            return
+        self._do_sync(reason="periodic")
+
+    def _do_sync(self, reason: str) -> None:
         try:
             from backend.services.vector_service import VectorService
 
-            # Reset the bootstrapped flag so ``bootstrap_from_qdrant``
-            # actually scrolls Qdrant. The function itself is idempotent
-            # — ``add_chunk`` skips keys already indexed — so calling it
-            # every time only costs one Qdrant scroll.
             self.index._bootstrapped = False  # type: ignore[attr-defined]
             count = bootstrap_from_qdrant(VectorService())
             logger.info(
-                "MinHash incremental sync: %s chunks now indexed.", count
+                "MinHash sync (%s) complete: %s chunks indexed.",
+                reason,
+                count,
             )
         except Exception:
-            logger.exception("MinHash incremental sync failed.")
+            logger.exception("MinHash sync failed.")
 
     def analyze_chunks(
         self,

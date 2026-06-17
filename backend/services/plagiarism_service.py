@@ -45,6 +45,7 @@ class PlagiarismService:
         top_k: int = settings.PLAGIARISM_TOP_K,
         excluded_scenario_ids: set[str] | None = None,
         chunk_metadata: list[dict[str, Any]] | None = None,
+        precomputed_embeddings: list[list[float]] | None = None,
     ) -> dict[str, Any]:
         """Analyze cleaned chunks against indexed scenarios to detect plagiarism.
 
@@ -79,11 +80,31 @@ class PlagiarismService:
                 len(chunks),
                 len(excluded),
             )
-            # Chunks here are used as *queries* against Qdrant — asymmetric
-            # E5-style models embed differently for queries vs passages.
-            embeddings = self.embedding_service.generate_embeddings(
-                chunks, is_query=True
-            )
+            # Si l'orchestrateur (PlagiarismPipeline) nous fournit deja
+            # les embeddings, on les reutilise — on evite ainsi de
+            # regenerer 148+ vecteurs deja calcules par ailleurs. Pour
+            # un doc de 148 chunks, ca economise ~30 s par analyse.
+            #
+            # Note : on accepte des embeddings calcules en mode passage
+            # (plutot que query). E5 est asymetrique, mais pour notre
+            # cas d'usage (chunks intra-corpus, tous des passages reels
+            # de scenarios), la perte de qualite est marginale.
+            if precomputed_embeddings is not None and len(
+                precomputed_embeddings
+            ) == len(chunks):
+                logger.info(
+                    "Reusing %s precomputed embeddings for plagiarism "
+                    "search (saved one full pass).",
+                    len(precomputed_embeddings),
+                )
+                embeddings = precomputed_embeddings
+            else:
+                # Chunks here are used as *queries* against Qdrant —
+                # asymmetric E5-style models embed differently for
+                # queries vs passages.
+                embeddings = self.embedding_service.generate_embeddings(
+                    chunks, is_query=True
+                )
 
             # Display-only hint: phrases that appear in many chunks of the
             # current document are likely templated boilerplate. We pass

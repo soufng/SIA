@@ -130,6 +130,7 @@ class MinHashIndex:
         self._payloads: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._bootstrapped = False
+        self._last_sync_at: float = 0.0
 
     @classmethod
     def get(cls) -> "MinHashIndex":
@@ -143,7 +144,21 @@ class MinHashIndex:
         return self._bootstrapped
 
     def mark_bootstrapped(self) -> None:
+        import time
+
         self._bootstrapped = True
+        self._last_sync_at = time.monotonic()
+
+    def seconds_since_last_sync(self) -> float:
+        import time
+
+        if self._last_sync_at == 0.0:
+            return float("inf")
+        return time.monotonic() - self._last_sync_at
+
+    def has_key(self, key: str) -> bool:
+        """O(1) check used to short-circuit re-indexing of known chunks."""
+        return key in self._signatures
 
     def add_chunk(
         self,
@@ -152,18 +167,23 @@ class MinHashIndex:
         payload: dict[str, Any],
     ) -> bool:
         """Index a single chunk. Returns True if the chunk was added."""
+        # Fast path: the resync loop calls us once per Qdrant point and
+        # most points are already indexed. Building the MinHash
+        # signature (~5-grammes + 128 hash updates) for every known
+        # chunk dwarfs the rest of the analysis, so we check membership
+        # *before* doing any work.
+        if key in self._signatures:
+            return False
         signature = build_signature(text)
         if signature is None:
             return False
         with self._lock:
             if key in self._signatures:
-                # Already indexed — skip the duplicate insertion to avoid
-                # the "key already exists" exception from MinHashLSH.
+                # Another worker raced us during signature build.
                 return False
             try:
                 self._lsh.insert(key, signature)
             except ValueError:
-                # Race with another worker — safe to ignore.
                 return False
             self._signatures[key] = signature
             self._payloads[key] = payload
