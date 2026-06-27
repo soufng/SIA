@@ -243,6 +243,7 @@ def _build_plagiarism_pipeline_with_strict(strict_stub):
         strict_similarity_service=strict_stub,
         embedding_service=Mock(),
         vector_service=Mock(),
+        minhash_service=Mock(),
     )
 
 

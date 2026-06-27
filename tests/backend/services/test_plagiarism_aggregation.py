@@ -15,6 +15,7 @@ def _build_service() -> PlagiarismPipeline:
         strict_similarity_service=Mock(),
         embedding_service=Mock(),
         vector_service=Mock(),
+        minhash_service=Mock(),
     )
 
 
